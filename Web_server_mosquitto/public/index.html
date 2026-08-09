@@ -1,0 +1,1145 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<title>스마트쉘터 CMS 통합관제</title>
+<script src="/socket.io/socket.io.js"></script>
+<link href="https://googleapis.com" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+ --primary: #1a56e8; --primary-light: #e8effe;
+ --success: #16a34a; --success-light: #dcfce7;
+ --danger: #dc2626; --danger-light: #fee2e2;
+ --warn: #d97706; --warn-light: #fef3c7;
+ --sidebar-w: 220px; --header-h: 56px;
+ --bg: #f5f6fa; --surface: #ffffff; --border: #e5e7eb;
+ --text: #111827; --text2: #6b7280; --text3: #9ca3af;
+ --radius: 12px; --shadow: 0 1px 4px rgba(0,0,0,.08);
+ }
+body { font-family: 'Noto Sans KR', sans-serif; background: var(--bg); color: var(--text); font-size: 14px; display: flex; height: 100vh; overflow: hidden; }
+#login-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 10000; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
+.login-box { background: var(--surface); padding: 32px; border-radius: var(--radius); width: 360px; box-shadow: 0 10px 25px rgba(0,0,0,0.2); text-align: center; }
+.login-box h2 { font-size: 20px; font-weight: 700; margin-bottom: 24px; color: var(--primary); }
+.login-box input { width: 100%; padding: 10px 14px; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 12px; font-size: 14px; outline: none; }
+.login-box input:focus { border-color: var(--primary); }
+.login-box button { width: 100%; padding: 12px; background: var(--primary); color: white; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; font-size: 14px; }
+.login-box button:hover { background: #1344bd; }
+#sidebar { width: var(--sidebar-w); background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; overflow-y: auto; }
+.sidebar-logo { padding: 20px 20px 16px; border-bottom: 1px solid var(--border); }
+.sidebar-logo .org { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 15px; color: var(--primary); margin-bottom: 4px; }
+.sidebar-logo .subtitle { font-size: 12px; color: var(--text2); font-weight: 600; }
+.nav-section { padding: 12px 8px 4px; }
+.nav-item { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 8px; cursor: pointer; color: var(--text2); font-weight: 500; font-size: 13.5px; transition: all .15s; user-select: none; }
+.nav-item:hover { background: var(--bg); color: var(--text); }
+.nav-item.active { background: var(--primary-light); color: var(--primary); font-weight: 600; }
+.sidebar-footer { margin-top: auto; padding: 16px; border-top: 1px solid var(--border); }
+.user-info { display: flex; align-items: center; gap: 10px; }
+.user-avatar { width: 34px; height: 34px; border-radius: 50%; background: var(--primary-light); display: flex; align-items: center; justify-content: center; color: var(--primary); font-weight: 700; }
+#main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+#header { height: var(--header-h); background: var(--surface); border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; padding: 0 24px; flex-shrink: 0; }
+.header-title { font-size: 17px; font-weight: 700; }
+.header-actions { display: flex; align-items: center; gap: 12px; }
+.header-time { font-size: 12px; color: var(--text2); }
+.icon-btn { width: 36px; height: 36px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); cursor: pointer; display: flex; align-items: center; justify-content: center; transition: background .15s; position: relative; }
+.icon-btn:hover { background: var(--bg); }
+.conn-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text3); transition: background .3s; }
+.conn-dot.online { background: var(--success); box-shadow: 0 0 0 3px var(--success-light); }
+#content { flex: 1; overflow-y: auto; padding: 24px; }
+.page { display: none; } .page.active { display: block; }
+.section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+.section-title { font-size: 15px; font-weight: 700; }
+.stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+.stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; display: flex; justify-content: space-between; align-items: flex-start; }
+.stat-num { font-size: 28px; font-weight: 700; line-height: 1; margin-top: 6px; }
+.stat-label { font-size: 12px; color: var(--text2); font-weight: 500; }
+.stat-sub { font-size: 12px; margin-top: 8px; font-weight: 500; }
+.stat-sub.green { color: var(--success); }
+.device-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin-bottom: 24px; }
+#page-control .device-grid { grid-template-columns: 1fr; }
+#page-control .ctrl-section-label { font-size: 11px; font-weight: 700; color: var(--text2); margin: 10px 0 6px; text-transform: uppercase; letter-spacing: .03em; }
+.device-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; transition: box-shadow .2s; }
+.device-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,.08); }
+.device-card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+.device-name { font-weight: 600; font-size: 14px; }
+.status-badge { font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 20px; }
+.status-badge.online { background: var(--success-light); color: var(--success); }
+.status-badge.offline { background: var(--border); color: var(--text2); }
+.device-data { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.data-item { background: var(--bg); border-radius: 8px; padding: 10px 12px; }
+.data-label { font-size: 11px; color: var(--text2); margin-bottom: 3px; }
+.data-value { font-size: 16px; font-weight: 700; }
+.data-unit { font-size: 11px; color: var(--text2); font-weight: 400; }
+.device-controls { display: flex; align-items: center; justify-content: space-between; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
+.toggle { position: relative; width: 44px; height: 24px; }
+.toggle input { opacity: 0; width: 0; height: 0; }
+.toggle-slider { position: absolute; inset: 0; background: var(--border); border-radius: 12px; cursor: pointer; transition: .25s; }
+.toggle-slider::before { content: ''; position: absolute; width: 18px; height: 18px; left: 3px; top: 3px; background: white; border-radius: 50%; transition: .25s; box-shadow: 0 1px 3px rgba(0,0,0,.2); }
+.toggle input:checked + .toggle-slider { background: var(--primary); }
+.toggle input:checked + .toggle-slider::before { transform: translateX(20px); }
+.ctrl-btn { padding: 6px 14px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); font-size: 12px; font-weight: 500; cursor: pointer; color: var(--text); transition: all .15s; }
+.ctrl-btn:hover { background: var(--primary); color: white; border-color: var(--primary); }
+.ctrl-btn.primary { background: var(--primary); color: white; border-color: var(--primary); }
+.ctrl-btn.danger { background: var(--danger-light); color: var(--danger); border-color: var(--danger); }
+.sensor-full { grid-column: 1 / -1; }
+.sensor-row { display: flex; gap: 12px; flex-wrap: wrap; }
+.sensor-chip { background: var(--bg); border-radius: 8px; padding: 10px 16px; text-align: center; min-width: 100px; }
+.sensor-chip .val { font-size: 20px; font-weight: 700; }
+.sensor-chip .lbl { font-size: 11px; color: var(--text2); margin-top: 2px; }
+.fan-duty { display: flex; align-items: center; gap: 12px; flex: 1; }
+.fan-duty input[type=range] { flex: 1; accent-color: var(--primary); }
+.fan-duty .duty-val { font-size: 14px; font-weight: 700; min-width: 36px; text-align: right; }
+.pb-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; width: 100%; margin-top: 14px; }
+.pb-ch { background: var(--bg); border-radius: 8px; padding: 12px; text-align: center; border: 1px solid var(--border); }
+.pb-ch.on { background: var(--primary-light); border-color: var(--primary); }
+.pb-ch .ch-label { font-size: 11px; color: var(--text2); font-weight: 600; }
+.pb-ch .ch-sw { font-size: 14px; font-weight: 700; margin: 4px 0; }
+.pb-ch.on .ch-sw { color: var(--primary); }
+.pb-ch .ch-power { font-size: 12px; color: var(--text2); }
+.pb-ctrl-panel { display: flex; gap: 10px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
+.mode-btns { display: flex; gap: 6px; flex-wrap: wrap; }
+.test-status-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 12px; }
+.test-status-chip { background: var(--bg); border-radius: 8px; padding: 8px 10px; }
+.test-status-chip .lbl { font-size: 10px; color: var(--text2); margin-bottom: 2px; }
+.test-status-chip .val { font-size: 14px; font-weight: 700; }
+.test-section { grid-column: 1 / -1; }
+.mode-btn { padding: 4px 10px; border-radius: 6px; border: 1px solid var(--border); font-size: 11px; font-weight: 600; cursor: pointer; background: var(--surface); transition: all .15s; }
+.mode-btn.active { background: var(--primary); color: white; border-color: var(--primary); }
+.temp-slider { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+.temp-slider input[type=range] { flex: 1; accent-color: var(--primary); }
+.relay-grid { display: flex; gap: 6px; flex-wrap: wrap; }
+.relay-btn { width: 36px; height: 36px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); cursor: pointer; font-size: 11px; font-weight: 600; transition: all .15s; display: flex; align-items: center; justify-content: center; }
+.relay-btn.on { background: var(--primary); color: white; border-color: var(--primary); }
+.log-container { background: #1e1e1e; color: #10b981; font-family: monospace; padding: 16px; border-radius: 8px; height: 300px; overflow-y: auto; font-size: 12px; line-height: 1.6; }
+.log-line { margin-bottom: 4px; border-bottom: 1px solid #2d2d2d; padding-bottom: 4px; }
+.log-time { color: #6b7280; margin-right: 8px; }
+.log-topic { color: #3b82f6; font-weight: 600; margin-right: 8px; }
+.sched-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; margin-bottom: 16px; }
+.sched-info { display: flex; flex-direction: column; gap: 4px; }
+.sched-time { font-size: 16px; font-weight: 700; color: var(--primary); }
+.sched-desc { font-size: 12px; color: var(--text2); }
+.chart-container { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; height: 240px; margin-top: 16px; display: flex; align-items: flex-end; gap: 4px; }
+.chart-bar-wrapper { flex: 1; display: flex; flex-direction: column; align-items: center; height: 100%; justify-content: flex-end; }
+.chart-bar { width: 100%; background: var(--primary); border-radius: 4px 4px 0 0; transition: height 0.5s ease; min-height: 2px; }
+.chart-label { font-size: 9px; color: var(--text2); margin-top: 4px; }
+#toast { position: fixed; bottom: 24px; right: 24px; padding: 12px 20px; border-radius: 10px; background: #1f2937; color: white; font-size: 13px; font-weight: 500; transform: translateY(80px); opacity: 0; transition: all .3s; z-index: 99999; pointer-events: none; }
+#toast.show { transform: translateY(0); opacity: 1; }
+#toast.success { background: var(--success); }
+#toast.error { background: var(--danger); }
+
+/* ── [FIX 2] 스케줄 채널 확장 패널 ── */
+.sched-expand-toggle { font-size: 11px; color: var(--primary); cursor: pointer; font-weight: 600; padding: 3px 8px; border: 1px solid var(--primary); border-radius: 6px; background: var(--primary-light); white-space: nowrap; user-select: none; }
+.sched-expand-toggle:hover { background: var(--primary); color: white; }
+.sched-ch-panel { display: none; margin-top: 12px; padding: 14px; background: var(--bg); border-radius: 8px; border: 1px solid var(--border); }
+.sched-ch-panel.open { display: block; }
+.sched-ch-title { font-size: 12px; font-weight: 700; color: var(--text2); margin-bottom: 8px; }
+.sched-relay-grid { display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 8px; }
+.sched-relay-btn { width: 34px; height: 28px; border-radius: 5px; border: 1px solid var(--border); background: var(--surface); cursor: pointer; font-size: 11px; font-weight: 600; transition: all .15s; display: flex; align-items: center; justify-content: center; color: var(--text2); }
+.sched-relay-btn.on { background: var(--primary); color: white; border-color: var(--primary); }
+.sched-pb-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 8px; }
+.sched-pb-ch { background: var(--surface); border-radius: 6px; padding: 8px; text-align: center; border: 1px solid var(--border); cursor: pointer; transition: all .15s; }
+.sched-pb-ch.on { background: var(--primary-light); border-color: var(--primary); }
+.sched-pb-ch .s-ch-label { font-size: 10px; color: var(--text2); font-weight: 600; }
+.sched-pb-ch .s-ch-sw { font-size: 13px; font-weight: 700; margin-top: 3px; }
+.sched-pb-ch.on .s-ch-sw { color: var(--primary); }
+.sched-ch-bulk { display: flex; gap: 6px; }
+</style>
+</head>
+
+<body>
+<div id="login-overlay">
+ <div class="login-box">
+ <h2>스마트쉘터 CMS 로그인</h2>
+ <input type="text" id="login-id" placeholder="관리자 ID" value="smart">
+ <input type="password" id="login-pw" placeholder="비밀번호" value="smart">
+ <button onclick="attemptLogin()">시스템 접속</button>
+ </div>
+</div>
+
+<nav id="sidebar">
+ <div class="sidebar-logo">
+ <div class="org">스마트쉘터 CMS</div>
+ <div class="subtitle">통합 관제 시스템</div>
+ </div>
+ <div class="nav-section">
+ <div class="nav-item active" onclick="navigate('dashboard')">📊 대시보드 종합관제</div>
+ <div class="nav-item" onclick="navigate('sensors')">🌡 센서 모니터링 현황</div>
+ <div class="nav-item" onclick="navigate('control')">⚙ 장비 원격제어</div>
+ <div class="nav-item" onclick="navigate('power')">⚡ 전원 관리 / 분전반</div>
+ <div class="nav-item" onclick="navigate('schedule')">📅 자동 제어 스케줄</div>
+ <div class="nav-item" onclick="navigate('logs')">📟 실시간 MQTT 로그</div>
+ </div>
+ <div class="sidebar-footer">
+ <div class="user-info">
+ <div class="user-avatar">M</div>
+ <div>
+ <div class="user-name">주무관 님</div>
+ <div class="user-role">최고 관리자 계정</div>
+ </div>
+ </div>
+ </div>
+</nav>
+
+<div id="main">
+ <header id="header">
+ <div class="header-title" id="page-title">대시보드 종합관제</div>
+ <div class="header-actions">
+ <span class="header-time" id="clock"></span>
+ <div class="conn-dot" id="conn-dot" title="서버 연결점"></div>
+ <button class="icon-btn" onclick="refreshAll()" title="전체 원격 갱신">🔄</button>
+ </div>
+ </header>
+ <div id="content">
+
+ <!-- ════ 1. 대시보드 종합관제 ════ -->
+ <div id="page-dashboard" class="page active">
+ <div class="stat-grid">
+ <div class="stat-card">
+ <div>
+ <div class="stat-label">메인보드 연결 상태</div>
+ <div class="stat-num" id="dash-online">오프라인</div>
+ <div class="stat-sub" id="dash-online-sub">인증 세션 확인 중...</div>
+ </div>
+ </div>
+ <div class="stat-card">
+ <div>
+ <div class="stat-label">실내 온도 / 습도</div>
+ <div class="stat-num" id="dash-temp">—</div>
+ <div class="stat-sub green" id="dash-humi">습도 —</div>
+ </div>
+ </div>
+ <div class="stat-card" style="border-left: 4px solid var(--primary);">
+ <div>
+ <div class="stat-label" style="color:var(--primary);">실외 온도 / 습도</div>
+ <div class="stat-num" id="dash-th-out-temp-main" style="color:#1e3a8a;">—</div>
+ <div class="stat-sub" id="dash-th-out-humi-sub" style="color:var(--primary);">습도 —</div>
+ </div>
+ </div>
+ <div class="stat-card" style="border-left: 4px solid var(--success);">
+ <div>
+ <div class="stat-label" style="color:var(--success);">공기질 데이터 (실외 PM2.5)</div>
+ <div class="stat-num"><span id="dash-pm25">—</span><span style="font-size:13px; color:var(--text2); font-weight:500;"> ㎍/㎥</span></div>
+ <div class="stat-sub" id="dash-pm-grade" style="color:var(--success);">대기 정보 확인 중...</div>
+ </div>
+ </div>
+ </div>
+ <div class="section-header"><div class="section-title">스마트 팩토리 코어 장비 요약 현황</div></div>
+ <div class="device-grid">
+ <div class="device-card">
+ <div class="device-card-header">
+ <div class="device-name">에어컨 (LG 냉난방기)</div>
+ <span class="status-badge offline" id="ac-badge">오프라인</span>
+ </div>
+ <div class="device-data">
+  <div class="data-item"><div class="data-label">설정 온도</div><div class="data-value" id="ac-temp">—<span class="data-unit"> °C</span></div></div>
+  <div class="data-item"><div class="data-label">현재 온도</div><div class="data-value" id="ac-curr">—<span class="data-unit"> °C</span></div></div>
+  <div class="data-item"><div class="data-label">가동 모드</div><div class="data-value" id="ac-mode" style="font-size:14px;">—</div></div>
+  <div class="data-item"><div class="data-label">송풍 속도</div><div class="data-value" id="ac-spd">—</div></div>
+  <div class="data-item"><div class="data-label">에러 코드</div><div class="data-value" id="ac-err" style="font-size:14px;">—</div></div>
+ </div>
+ </div>
+ <div class="device-card">
+ <div class="device-card-header">
+  <div class="device-name">내부 환기팬 (인버터 송풍 장치)</div>
+  <span class="status-badge offline" id="fan-badge">오프라인</span>
+ </div>
+ <div class="device-data">
+  <div class="data-item"><div class="data-label">운전 모드</div><div class="data-value" id="fan-mode" style="font-size:14px;">—</div></div>
+  <div class="data-item"><div class="data-label">현재 가동 듀티비</div><div class="data-value" id="fan-duty-val">—</div></div>
+ </div>
+ </div>
+ <div class="device-card">
+ <div class="device-card-header">
+  <div class="device-name">인버터 공기청정기</div>
+  <span class="status-badge offline" id="ap-badge">오프라인</span>
+ </div>
+ <div class="device-data">
+  <div class="data-item"><div class="data-label">CO₂ 농도</div><div class="data-value" id="ap-co2">—<span class="data-unit"> ppm</span></div></div>
+  <div class="data-item"><div class="data-label">실내 초미세</div><div class="data-value" id="ap-pm25">—<span class="data-unit"> ㎍</span></div></div>
+  <div class="data-item"><div class="data-label">운전 상태</div><div class="data-value" id="ap-mode" style="font-size:14px;">—</div></div>
+  <div class="data-item"><div class="data-label">헤파필터 잔량</div><div class="data-value" id="ap-filter">—<span class="data-unit"> %</span></div></div>
+  <div class="data-item"><div class="data-label">실내 온도</div><div class="data-value" id="ap-temp">—<span class="data-unit"> °C</span></div></div>
+  <div class="data-item"><div class="data-label">배기 온도</div><div class="data-value" id="ap-temp-out">—<span class="data-unit"> °C</span></div></div>
+  <div class="data-item"><div class="data-label">TVOC</div><div class="data-value" id="ap-tvoc">—<span class="data-unit"> ppb</span></div></div>
+ </div>
+ </div>
+ </div>
+ </div>
+
+ <!-- ════ 2. 센서 모니터링 현황 ════ -->
+ <div id="page-sensors" class="page">
+ <div class="section-header"><div class="section-title">아날로그 센서 텔레메트리 데이터</div></div>
+ <div class="device-grid">
+ <div class="device-card sensor-full">
+ <div class="device-card-header">
+ <div class="device-name">고정밀 미세먼지 센서 패키지</div>
+ <span class="status-badge offline" id="dust-badge">오프라인</span>
+ </div>
+ <div class="sensor-row">
+ <div class="sensor-chip"><div class="val" id="s-pm1">—</div><div class="lbl">PM1.0 (㎍/㎥)</div></div>
+ <div class="sensor-chip"><div class="val" id="s-pm25">—</div><div class="lbl">PM2.5 (㎍/㎥)</div></div>
+ <div class="sensor-chip"><div class="val" id="s-pm10">—</div><div class="lbl">PM10 (㎍/㎥)</div></div>
+ <div class="sensor-chip" id="s-dust-grade-chip"><div class="val" id="s-dust-grade" style="font-size:16px;">—</div><div class="lbl">통합 공기질</div></div>
+ </div>
+ </div>
+ <div class="device-card">
+ <div class="device-card-header"><div class="device-name">내부 온습도 수집기</div><span class="status-badge offline" id="th-in-badge">오프라인</span></div>
+ <div class="sensor-row">
+ <div class="sensor-chip"><div class="val" id="s-in-temp">—</div><div class="lbl">온도 (°C)</div></div>
+ <div class="sensor-chip"><div class="val" id="s-in-humi">—</div><div class="lbl">습도 (%)</div></div>
+ </div>
+ </div>
+ <div class="device-card">
+ <div class="device-card-header"><div class="device-name">외기 환경 온습도계</div><span class="status-badge offline" id="th-out-badge">오프라인</span></div>
+ <div class="sensor-row">
+ <div class="sensor-chip"><div class="val" id="s-out-temp">—</div><div class="lbl">온도 (°C)</div></div>
+ <div class="sensor-chip"><div class="val" id="s-out-humi">—</div><div class="lbl">습도 (%)</div></div>
+ </div>
+ </div>
+ </div>
+ </div>
+
+ <!-- ════ 3. 장비 원격제어 ════ -->
+ <div id="page-control" class="page">
+ <div class="section-header">
+  <div class="section-title">액추에이터 및 원격 제어 (AP / AC 확장)</div>
+  <span style="font-size:11px; color:var(--text2);">아래로 스크롤 → 현장 테스트 패널</span>
+ </div>
+ <div class="device-grid">
+
+ <!-- 에어컨 -->
+ <div class="device-card">
+ <div class="device-card-header"><div class="device-name">에어컨 (LG Modbus RTU)</div><span class="status-badge offline" id="ctrl-ac-badge">오프라인</span></div>
+ <div class="test-status-row">
+  <div class="test-status-chip"><div class="lbl">설정온도</div><div class="val" id="ctrl-ac-st-temp">—</div></div>
+  <div class="test-status-chip"><div class="lbl">실내온도</div><div class="val" id="ctrl-ac-st-curr">—</div></div>
+  <div class="test-status-chip"><div class="lbl">모드/풍량</div><div class="val" id="ctrl-ac-st-mode">—</div></div>
+  <div class="test-status-chip"><div class="lbl">에러</div><div class="val" id="ctrl-ac-st-err">—</div></div>
+ </div>
+ <div class="temp-slider">
+ <span style="font-size:14px; font-weight:700; min-width:40px;" id="ctrl-ac-temp-val">24°C</span>
+ <input type="range" min="16" max="30" value="24" id="ctrl-ac-temp" oninput="document.getElementById('ctrl-ac-temp-val').textContent=this.value+'°C'">
+ <button class="ctrl-btn primary" onclick="sendCmd('ac',{temp:parseInt(document.getElementById('ctrl-ac-temp').value)})">설정 변경</button>
+ </div>
+ <div class="device-controls" style="margin-top:12px; flex-wrap:wrap; gap:8px;">
+ <label class="toggle"><input type="checkbox" id="ctrl-ac-toggle" onclick="handlePowerToggle('ac', this)"><span class="toggle-slider"></span></label>
+ <div class="mode-btns">
+ <button class="mode-btn" onclick="sendCmd('ac',{mode:'COOL'})">냉방</button>
+ <button class="mode-btn" onclick="sendCmd('ac',{mode:'HEAT'})">난방</button>
+ <button class="mode-btn" onclick="sendCmd('ac',{mode:'FAN'})">송풍</button>
+ <button class="mode-btn" onclick="sendCmd('ac',{mode:'DRY'})">제습</button>
+ <button class="mode-btn" onclick="sendCmd('ac',{mode:'AUTO'})">자동</button>
+ </div>
+ </div>
+ <div class="ctrl-section-label">풍량 · 조회</div>
+ <div style="display:flex; gap:4px; flex-wrap:wrap; align-items:center;">
+ <button class="ctrl-btn" onclick="sendCmd('ac',{spd:1})">1</button>
+ <button class="ctrl-btn" onclick="sendCmd('ac',{spd:2})">2</button>
+ <button class="ctrl-btn" onclick="sendCmd('ac',{spd:3})">3</button>
+ <button class="ctrl-btn" onclick="sendCmd('ac',{spd:4})">4</button>
+ <button class="ctrl-btn primary" style="margin-left:8px;" onclick="requestDeviceState('ac')">상태 조회</button>
+ <button class="ctrl-btn" onclick="runAcPresetTest()">일괄 set_ac</button>
+ </div>
+ </div>
+
+ <!-- [FIX 4] 공기청정기를 환기팬 앞 위치로 이동 -->
+ <div class="device-card">
+ <div class="device-card-header"><div class="device-name">공기청정기 (Himpel RS485)</div><span class="status-badge offline" id="ctrl-ap-badge">오프라인</span></div>
+ <div class="test-status-row">
+  <div class="test-status-chip"><div class="lbl">실내온도</div><div class="val" id="ctrl-ap-st-temp">—</div></div>
+  <div class="test-status-chip"><div class="lbl">배기온도</div><div class="val" id="ctrl-ap-st-temp-out">—</div></div>
+  <div class="test-status-chip"><div class="lbl">TVOC / CO₂</div><div class="val" id="ctrl-ap-st-tvoc">—</div></div>
+  <div class="test-status-chip"><div class="lbl">모드/풍량/UV</div><div class="val" id="ctrl-ap-st-mode">—</div></div>
+ </div>
+ <div class="ctrl-section-label">풍량</div>
+ <div style="display:flex; gap:4px; margin-bottom:8px; flex-wrap:wrap;">
+ <button class="ctrl-btn" onclick="sendCmd('ap',{spd:1})">1단</button>
+ <button class="ctrl-btn" onclick="sendCmd('ap',{spd:2})">2단</button>
+ <button class="ctrl-btn" onclick="sendCmd('ap',{spd:3})">3단</button>
+ <button class="ctrl-btn" onclick="sendCmd('ap',{spd:4})">4단(터보)</button>
+ </div>
+ <div class="ctrl-section-label">운전 모드</div>
+ <div style="display:flex; gap:4px; margin-bottom:8px; flex-wrap:wrap;">
+ <button class="mode-btn" onclick="sendCmd('ap',{mode:'AUTO'})">자동</button>
+ <button class="mode-btn" onclick="sendCmd('ap',{mode:'CLEAN'})">청정</button>
+ <button class="mode-btn" onclick="sendCmd('ap',{mode:'VENT'})">환기</button>
+ <button class="mode-btn" onclick="sendCmd('ap',{mode:'BYPASS'})">바이패스</button>
+ <button class="mode-btn" onclick="sendCmd('ap',{mode:'HEATER'})">난방</button>
+ </div>
+ <div class="ctrl-section-label">UV · Bypass · 일괄 명령</div>
+ <div style="display:flex; gap:4px; margin-bottom:12px; flex-wrap:wrap;">
+ <button class="ctrl-btn" onclick="sendCmd('ap',{uv:1})">UV ON</button>
+ <button class="ctrl-btn" onclick="sendCmd('ap',{uv:0})">UV OFF</button>
+ <button class="ctrl-btn" onclick="sendCmd('ap',{bypass:1})">Bypass ON</button>
+ <button class="ctrl-btn" onclick="sendCmd('ap',{bypass:0})">Bypass OFF</button>
+ <button class="ctrl-btn primary" onclick="requestDeviceState('ap')">상태 조회</button>
+ <button class="ctrl-btn" onclick="runApPresetTest()">일괄 set_ap</button>
+ </div>
+ <div class="device-controls">
+ <label class="toggle"><input type="checkbox" id="ctrl-ap-toggle" onclick="handlePowerToggle('ap', this)"><span class="toggle-slider"></span></label>
+ <button class="ctrl-btn danger" onclick="sendCmd('ap',{filter_reset:1})">필터 초기화</button>
+ </div>
+ </div>
+
+ <!-- [FIX 4] 환기팬을 공기청정기 뒤 위치로 이동 -->
+ <div class="device-card">
+ <div class="device-card-header"><div class="device-name">환기팬 인버터 풍속 제어</div><span class="status-badge offline" id="ctrl-fan-badge">오프라인</span></div>
+ <div style="display:flex; gap:8px; margin-bottom:10px;">
+ <button class="mode-btn" id="fan-btn-auto" onclick="sendCmd('fan',{set_fan:{mode:'AUTO',duty:0}})">자동 모드</button>
+ <button class="mode-btn" id="fan-btn-manual" onclick="sendCmd('fan',{set_fan:{mode:'MANUAL',duty:50}})">수동 모드</button>
+ </div>
+ <div class="fan-duty">
+ <span style="font-size:12px; color:var(--text2);">수동 출력</span>
+ <input type="range" min="0" max="100" value="50" id="ctrl-fan-slider" oninput="document.getElementById('ctrl-fan-out').textContent=this.value+'%'">
+ <span class="duty-val" id="ctrl-fan-out">50%</span>
+ <button class="ctrl-btn primary" onclick="sendCmd('fan',{set_fan:{mode:'MANUAL',duty:parseInt(document.getElementById('ctrl-fan-slider').value)}})">수동 적용</button>
+ </div>
+ </div>
+
+ <!-- 자동문 릴레이 -->
+ <div class="device-card">
+ <div class="device-card-header"><div class="device-name">자동문 및 셔터 (15ch 독립 릴레이)</div><span class="status-badge offline" id="ctrl-ad-badge">오프라인</span></div>
+ <div style="margin-bottom:12px;"><div class="data-label" style="margin-bottom:6px;">채널 클릭 시 개별 제어 신호 발송</div><div class="relay-grid" id="ctrl-relay-grid"></div></div>
+ <!--
+   [FIX 3] 전체 열기/닫기 클릭 시 개별 relay-btn 색상 즉시 동기화
+   기존: sendCmd('ad',{set_ad:'111...'}) 만 호출 → 개별 버튼 색상 미변경
+   수정: sendAdAll(state) 함수에서 relay-btn 전체를 순회하여 .on 클래스 즉시 토글
+ -->
+ <div class="device-controls">
+ <button class="ctrl-btn primary" onclick="sendAdAll(1)">전체 채널 열기</button>
+ <button class="ctrl-btn danger" onclick="sendAdAll(0)">전체 채널 닫기</button>
+ </div>
+ </div>
+
+ <!-- 현장 테스트 패널 -->
+ <div class="section-header test-section" id="field-test-panel" style="margin-top:8px;">
+  <div class="section-title">🧪 AP / AC 현장 테스트 시퀀스</div>
+ </div>
+ <div class="device-card sensor-full test-section">
+  <div style="font-size:12px; color:var(--text2); margin-bottom:14px;">
+   펌웨어 프로토콜 기준 전체 명령(get/set)을 순차 실행합니다. MQTT 로그 탭에서 <code>dev/stat/ac</code>, <code>dev/stat/ap</code> 응답의 <code>result:1</code>을 확인하세요.
+  </div>
+  <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+   <div>
+    <div style="font-weight:600; margin-bottom:8px;">에어컨 (AC) 테스트</div>
+    <div style="display:flex; gap:6px; flex-wrap:wrap;">
+     <button class="ctrl-btn primary" onclick="requestDeviceState('ac')">① get_ac</button>
+     <button class="ctrl-btn" onclick="sendCmd('ac',{pwr:1})">② 전원 ON</button>
+     <button class="ctrl-btn" onclick="sendCmd('ac',{mode:'COOL',temp:24,spd:2})">③ 냉방 24°C</button>
+     <button class="ctrl-btn" onclick="runAcPresetTest()">④ set_ac 일괄</button>
+     <button class="ctrl-btn danger" onclick="sendCmd('ac',{pwr:0})">⑤ 전원 OFF</button>
+    </div>
+   </div>
+   <div>
+    <div style="font-weight:600; margin-bottom:8px;">공기청정기 (AP) 테스트</div>
+    <div style="display:flex; gap:6px; flex-wrap:wrap;">
+     <button class="ctrl-btn primary" onclick="requestDeviceState('ap')">① get_ap</button>
+     <button class="ctrl-btn" onclick="sendCmd('ap',{pwr:1,mode:'AUTO',spd:2})">② AUTO 2단</button>
+     <button class="ctrl-btn" onclick="sendCmd('ap',{mode:'VENT',spd:3})">③ 환기 3단</button>
+     <button class="ctrl-btn" onclick="runApPresetTest()">④ set_ap 일괄</button>
+     <button class="ctrl-btn danger" onclick="sendCmd('ap',{pwr:0})">⑤ 전원 OFF</button>
+    </div>
+   </div>
+  </div>
+  <div style="margin-top:16px; display:flex; gap:8px; flex-wrap:wrap; border-top:1px solid var(--border); padding-top:14px;">
+   <button class="ctrl-btn primary" onclick="runFullApAcTest()">▶ AP+AC 순차 전체 테스트</button>
+   <button class="ctrl-btn" onclick="refreshAll()">전체 상태 동기화 (ALL_DATA)</button>
+  </div>
+ </div>
+
+ </div><!-- /device-grid -->
+ <div class="section-header" style="margin-top:8px;"><div class="section-title">물리 장치 전력 코어 관리</div></div>
+ <div style="display:flex; gap:12px;">
+ <button class="ctrl-btn danger" onclick="if(confirm('쉘터 장치를 하드웨어 원격 재부팅 하시겠습니까?'))sendCmd('dev',{reset:'DEV_RESET'})">장치 원격 재부팅</button>
+ <button class="ctrl-btn" onclick="refreshAll()">전체 데이터 동기화</button>
+ </div>
+ </div>
+
+ <!-- ════ 4. 전원 관리 / 분전반 ════ -->
+ <div id="page-power" class="page">
+ <div class="section-header"><div class="section-title">스마트 분전반 메인 상태 (8 채널)</div></div>
+ <div class="device-card sensor-full">
+ <div class="device-card-header"><div class="device-name">전원 보드 상태 및 실시간 개별 제어</div><span class="status-badge offline" id="pb-badge">오프라인</span></div>
+ <div class="pb-grid" id="pb-grid">
+ <div style="color:var(--text2); font-size:13px; grid-column:span 4;">실시간 통계 수치 패킷 수신 대기 중...</div>
+ </div>
+ <!--
+   [FIX 3] 전체 ON/OFF 클릭 시 pb-grid 내 개별 채널 박스 색상 즉시 동기화
+   기존: sendCmd('pb',{set_pb:'11111111'}) 만 호출 → 개별 박스 색상 미변경
+   수정: sendPbAll(state) 에서 pb-grid 내 .pb-ch 박스 전체 순회하여 .on 클래스 즉시 토글
+ -->
+ <div class="pb-ctrl-panel">
+ <button class="ctrl-btn primary" onclick="sendPbAll(1)">⚡ 전 채널 일제 가동 (ALL ON)</button>
+ <button class="ctrl-btn danger" onclick="sendPbAll(0)">🔌 전 채널 일제 차단 (ALL OFF)</button>
+ <span style="font-size:12px; color:var(--text2); display:flex; align-items:center; margin-left:10px;">※ 채널 박스를 직접 클릭하면 실시간 개별 기믹이 작동합니다.</span>
+ </div>
+ </div>
+ <div class="section-header" style="margin-top:24px;"><div class="section-title">8 개 채널 전체 합산 24 시간 실시간 누적 전력 사용량 현황</div></div>
+ <div class="chart-container" id="power-bar-chart"></div>
+ </div>
+
+ <!-- ════ 5. 자동 제어 스케줄 ════ -->
+ <div id="page-schedule" class="page">
+ <div class="section-header"><div class="section-title">출퇴근 타이머 기준 하드웨어 자동화 스케줄 설정</div></div>
+
+ <!-- 출근 스케줄 -->
+ <div class="sched-card" style="padding: 24px; margin-bottom: 20px;">
+ <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); padding-bottom: 14px; margin-bottom: 16px;">
+ <div class="sched-info">
+ <span class="sched-time" style="font-size: 18px; display: flex; align-items: center; gap: 8px;">🌅 동적 출근 모드 타이머 설정</span>
+ <span class="sched-desc">지정된 출근 시각에 맞춰 쉘터 내부 하드웨어를 안전 구동합니다.</span>
+ </div>
+ <div style="display: flex; align-items: center; gap: 6px;">
+ <input type="time" id="sched-time-morning" value="07:00" style="padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; font-size: 16px; font-weight: 700; color: var(--primary); font-family: monospace; outline: none;">
+ <button class="ctrl-btn primary" onclick="updateScheduleTime('morning')">시간 저장</button>
+ </div>
+ </div>
+ <!-- 장치 버튼 행 -->
+ <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
+ <button class="mode-btn active" id="sched-btn-ac-m" onclick="this.classList.toggle('active')">에어컨 (AC)</button>
+ <button class="mode-btn active" id="sched-btn-ap-m" onclick="this.classList.toggle('active')">공기청정기 (AP)</button>
+ <button class="mode-btn active" id="sched-btn-ad-m" onclick="this.classList.toggle('active')">자동문 (AD)</button>
+ <!--
+   [FIX 2] AD 채널 세부설정 버튼: 클릭 시 15ch 개별 ON/OFF 패널 토글
+ -->
+ <span class="sched-expand-toggle" onclick="toggleSchedPanel('ad-m')">채널 세부설정 ▾</span>
+ <button class="mode-btn active" id="sched-btn-pb-m" onclick="this.classList.toggle('active')">전력보드 (PB)</button>
+ <!--
+   [FIX 2] PB 채널 세부설정 버튼: 클릭 시 8ch 개별 ON/OFF 패널 토글
+ -->
+ <span class="sched-expand-toggle" onclick="toggleSchedPanel('pb-m')">채널 세부설정 ▾</span>
+ </div>
+
+ <!-- AD 15ch 확장 패널 (출근) -->
+ <div class="sched-ch-panel" id="sched-panel-ad-m">
+ <div class="sched-ch-title">자동문 채널 ON/OFF 설정 (15ch) — 활성 채널만 출근 시 개방됩니다</div>
+ <div class="sched-relay-grid" id="sched-ad-relay-m"></div>
+ <div class="sched-ch-bulk">
+ <button class="ctrl-btn primary" style="font-size:11px;" onclick="setSchedAdAll('m',1)">전체 선택</button>
+ <button class="ctrl-btn danger" style="font-size:11px;" onclick="setSchedAdAll('m',0)">전체 해제</button>
+ </div>
+ </div>
+
+ <!-- PB 8ch 확장 패널 (출근) -->
+ <div class="sched-ch-panel" id="sched-panel-pb-m">
+ <div class="sched-ch-title">전력보드 채널 ON/OFF 설정 (8ch) — 활성 채널만 출근 시 가동됩니다</div>
+ <div class="sched-pb-grid" id="sched-pb-ch-m"></div>
+ <div class="sched-ch-bulk">
+ <button class="ctrl-btn primary" style="font-size:11px;" onclick="setSchedPbAll('m',1)">전체 ON</button>
+ <button class="ctrl-btn danger" style="font-size:11px;" onclick="setSchedPbAll('m',0)">전체 OFF</button>
+ </div>
+ </div>
+ </div>
+
+ <!-- 퇴근 스케줄 -->
+ <div class="sched-card" style="padding: 24px;">
+ <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); padding-bottom: 14px; margin-bottom: 16px;">
+ <div class="sched-info">
+ <span class="sched-time" style="font-size: 18px; display: flex; align-items: center; gap: 8px;">🌙 동적 퇴근/보안 모드 타이머 설정</span>
+ <span class="sched-desc">지정된 퇴근 시각에 맞춰 전 채널 안전 소등 및 차단을 수행합니다.</span>
+ </div>
+ <div style="display: flex; align-items: center; gap: 6px;">
+ <input type="time" id="sched-time-night" value="20:00" style="padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; font-size: 16px; font-weight: 700; color: var(--warn); font-family: monospace; outline: none;">
+ <button class="ctrl-btn primary" onclick="updateScheduleTime('night')">시간 저장</button>
+ </div>
+ </div>
+ <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
+ <button class="mode-btn active" id="sched-btn-ac-n" onclick="this.classList.toggle('active')">에어컨 (OFF)</button>
+ <button class="mode-btn active" id="sched-btn-ap-n" onclick="this.classList.toggle('active')">공기청정기 (OFF)</button>
+ <button class="mode-btn active" id="sched-btn-ad-n" onclick="this.classList.toggle('active')">자동문 (CLOSE)</button>
+ <span class="sched-expand-toggle" onclick="toggleSchedPanel('ad-n')">채널 세부설정 ▾</span>
+ <button class="mode-btn active" id="sched-btn-pb-n" onclick="this.classList.toggle('active')">전력보드 (OFF)</button>
+ <span class="sched-expand-toggle" onclick="toggleSchedPanel('pb-n')">채널 세부설정 ▾</span>
+ </div>
+
+ <!-- AD 15ch 확장 패널 (퇴근) -->
+ <div class="sched-ch-panel" id="sched-panel-ad-n">
+ <div class="sched-ch-title">자동문 채널 ON/OFF 설정 (15ch) — 활성 채널만 퇴근 시 폐쇄됩니다</div>
+ <div class="sched-relay-grid" id="sched-ad-relay-n"></div>
+ <div class="sched-ch-bulk">
+ <button class="ctrl-btn primary" style="font-size:11px;" onclick="setSchedAdAll('n',1)">전체 선택</button>
+ <button class="ctrl-btn danger" style="font-size:11px;" onclick="setSchedAdAll('n',0)">전체 해제</button>
+ </div>
+ </div>
+
+ <!-- PB 8ch 확장 패널 (퇴근) -->
+ <div class="sched-ch-panel" id="sched-panel-pb-n">
+ <div class="sched-ch-title">전력보드 채널 ON/OFF 설정 (8ch) — 활성 채널만 퇴근 시 차단됩니다</div>
+ <div class="sched-pb-grid" id="sched-pb-ch-n"></div>
+ <div class="sched-ch-bulk">
+ <button class="ctrl-btn primary" style="font-size:11px;" onclick="setSchedPbAll('n',1)">전체 ON</button>
+ <button class="ctrl-btn danger" style="font-size:11px;" onclick="setSchedPbAll('n',0)">전체 OFF</button>
+ </div>
+ </div>
+ </div>
+ </div>
+
+ <!-- ════ 6. MQTT 실시간 로그 ════ -->
+ <div id="page-logs" class="page">
+ <div class="section-header">
+ <div class="section-title">MOSQUITTO LOCAL 인입 원본 통신 패킷 실시간 스트리밍</div>
+ <button class="ctrl-btn danger" onclick="document.getElementById('mqtt-log-board').innerHTML=''">로그 콘솔 비우기</button>
+ </div>
+ <div class="log-container" id="mqtt-log-board">
+ <div class="log-line"><span class="log-time">[SYSTEM]</span> 관제 콘솔 파이프라인 대기 중... 패킷 인입 시 실시간 표출됩니다.</div>
+ </div>
+ </div>
+
+ </div><!-- /content -->
+</div><!-- /main -->
+<div id="toast"></div>
+
+<script>
+let socket = null;
+let mqttConnected = false;
+
+// ═══════════════════════════════════════════════════════════
+// [FIX 1] 전원 버튼 2회 클릭 버그 수정
+// 원인: onchange 이벤트 핸들러 내에서 sendCmd로 상태를 전송하고,
+//       서버 응답(device_update)을 받으면 updateDevice()에서
+//       tg.checked = !!data.pwr 로 다시 덮어쓰는 구조가 충돌.
+//       첫 클릭 → checked 반전 → sendCmd 전송 → 서버 응답 전 updateDevice가
+//       이전 pwr 값으로 checked를 되돌려버림 → 시각적으로 두번 눌러야 반영.
+// 해결: onclick으로 변경하여 클릭 시점의 checked(이미 반전됨)를 읽어 명시적 전송.
+//       updateDevice()에서는 서버 응답이 확정된 후에만 checked를 업데이트.
+// ═══════════════════════════════════════════════════════════
+function handlePowerToggle(device, checkbox) {
+ const newState = checkbox.checked ? 1 : 0;
+ sendCmd(device, { pwr: newState });
+}
+
+// ═══════════════════════════════════════════════════════════
+// [FIX 3] AD 전체 열기/닫기 → 개별 relay-btn 색상 즉시 동기화
+// ═══════════════════════════════════════════════════════════
+function sendAdAll(state) {
+ const bitStr = state === 1 ? '111111111111111' : '000000000000000';
+ sendCmd('ad', { set_ad: bitStr });
+ if (!window.doorRelayState) window.doorRelayState = Array(15).fill(0);
+ const grid = document.getElementById('ctrl-relay-grid');
+ if (!grid) return;
+ grid.querySelectorAll('.relay-btn').forEach((btn, i) => {
+ window.doorRelayState[i] = state;
+ btn.classList.toggle('on', state === 1);
+ });
+}
+
+// ═══════════════════════════════════════════════════════════
+// [FIX 3] PB 전체 ON/OFF → 개별 pb-ch 박스 색상 즉시 동기화
+// ═══════════════════════════════════════════════════════════
+function sendPbAll(state) {
+ const bitStr = state === 1 ? '11111111' : '00000000';
+ sendCmd('pb', { set_pb: bitStr });
+ const pbGrid = document.getElementById('pb-grid');
+ if (!pbGrid) return;
+ pbGrid.querySelectorAll('.pb-ch').forEach((box, idx) => {
+ box.classList.toggle('on', state === 1);
+ const swEl = box.querySelector('.ch-sw');
+ if (swEl) swEl.textContent = state === 1 ? 'ON' : 'OFF';
+ // 개별 박스 onclick nextState도 갱신
+ const ch = idx + 1;
+ const nextState = state === 1 ? 0 : 1;
+ box.onclick = () => sendCmd('pb', { ch, sw: nextState });
+ });
+}
+
+function attemptLogin() {
+ const id = document.getElementById('login-id').value;
+ const pw = document.getElementById('login-pw').value;
+ fetch('/api/login', {
+ method: 'POST',
+ headers: { 'Content-Type': 'application/json' },
+ body: JSON.stringify({ id, pw })
+ })
+ .then(res => res.json())
+ .then(res => {
+ if (res.success) {
+ localStorage.setItem('shelter_auth_token', res.token);
+ document.getElementById('login-overlay').style.display = 'none';
+ showToast('정상 권한 확인 완료. 스마트쉘터 코어 관제망에 접속합니다.', 'success');
+ initSocketConnection(res.token);
+ } else {
+ showToast(res.message, 'error');
+ }
+ });
+}
+
+window.onload = () => {
+ const savedToken = localStorage.getItem('shelter_auth_token');
+ if (savedToken) {
+ document.getElementById('login-overlay').style.display = 'none';
+ initSocketConnection(savedToken);
+ }
+ initSchedChannelPanels(); // [FIX 2] 채널 패널 초기화
+};
+
+function initSocketConnection(token) {
+ socket = io({ transports: ['websocket'], upgrade: false });
+ socket.on('connect', () => {
+ document.getElementById('conn-dot').classList.add('online');
+ mqttConnected = true;
+ socket.emit('verify_token', token);
+ });
+ socket.on('auth_result', (res) => {
+ if (!res.success) {
+ localStorage.removeItem('shelter_auth_token');
+ document.getElementById('login-overlay').style.display = 'flex';
+ showToast('세션 인증 정보가 유실되었습니다. 재로그인 필요.', 'error');
+ }
+ });
+ socket.on('disconnect', () => {
+ document.getElementById('conn-dot').classList.remove('online');
+ mqttConnected = false;
+ });
+
+ socket.on('clear_ui_reset', () => {
+ document.getElementById('dash-online').textContent = '오프라인';
+ document.getElementById('dash-online-sub').textContent = '장치 단선됨(데이터 리셋)';
+ document.getElementById('dash-temp').textContent = '—';
+ document.getElementById('dash-humi').textContent = '습도 —';
+ document.getElementById('dash-th-out-temp-main').textContent = '—';
+ document.getElementById('dash-th-out-humi-sub').textContent = '습도 —';
+ document.getElementById('dash-pm25').textContent = '—';
+ document.getElementById('dash-pm-grade').textContent = '대기 정보 확인 중...';
+ ['ac-badge','ap-badge','fan-badge','ad-badge','dust-badge','th-in-badge','th-out-badge'].forEach(id => setBadge(id, false));
+ setText('ac-temp',null); setText('ac-curr',null); setText('ac-spd',null); setText('ac-err',null);
+ setText('ap-co2',null); setText('ap-pm25',null); setText('ap-filter',null);
+ setText('ap-temp',null); setText('ap-temp-out',null); setText('ap-tvoc',null);
+ setText('s-pm1',null); setText('s-pm25',null); setText('s-pm10',null); setText('s-dust-grade',null);
+ setText('s-in-temp',null); setText('s-in-humi',null); setText('s-out-temp',null); setText('s-out-humi',null);
+ showToast('물리 장치 연결 해제 상태 감지: 실시간 캐시 리셋 완료.', 'error');
+ });
+
+ socket.on('mqtt_live_log', (log) => {
+ const board = document.getElementById('mqtt-log-board');
+ if (!board) return;
+ const logLine = document.createElement('div');
+ logLine.className = 'log-line';
+ logLine.innerHTML = `<span class="log-time">[${log.time}]</span><span class="log-topic">${log.topic}</span> => ${log.payload}`;
+ board.appendChild(logLine);
+ board.scrollTop = board.scrollHeight;
+ });
+
+ socket.on('initial_state', (state) => {
+ updateAll(state);
+ if (state._hourlyPowerStats) renderPowerChart(state._hourlyPowerStats);
+ if (state._mqttLogSession) {
+ const board = document.getElementById('mqtt-log-board');
+ if (board) {
+ board.innerHTML = '';
+ state._mqttLogSession.forEach(log => {
+ const logLine = document.createElement('div');
+ logLine.className = 'log-line';
+ logLine.innerHTML = `<span class="log-time">[${log.time}]</span><span class="log-topic">${log.topic}</span> => ${log.payload}`;
+ board.appendChild(logLine);
+ });
+ }
+ }
+ });
+
+ socket.on('device_update', ({ topic, data }) => {
+ const keyMap = {
+ 'dev/tele/state': 'state', 'dev/tele/dust': 'dust', 'dev/tele/th_in': 'th_in',
+ 'dev/tele/th_out': 'th_out', 'dev/tele/ad': 'ad', 'dev/tele/fan': 'fan',
+ 'dev/stat/pb': 'pb', 'dev/tele/pb': 'pb', 'dev/tele/ap': 'ap', 'dev/tele/ac': 'ac'
+ };
+ const key = keyMap[topic];
+ if (key) updateDevice(key, data);
+ });
+
+ socket.on('cmd_result', ({ success, device, topic }) => {
+ const label = device ? device.toUpperCase() : 'CMD';
+ const isStat = topic && topic.startsWith('dev/stat/');
+ const msg = isStat
+  ? (success ? `${label} stat 응답 OK (result:1)` : `${label} stat 실패 (result:0 또는 conn:0)`)
+  : (success ? `${label} 명령 송출 완료` : '명령 전송 에러');
+ showToast(msg, success ? 'success' : 'error');
+ });
+
+ initRelayGrids();
+ loadSavedSchedules();
+}
+
+function initRelayGrids() {
+ const el = document.getElementById('ctrl-relay-grid');
+ if (!el) return;
+ el.innerHTML = '';
+ if (!window.doorRelayState) window.doorRelayState = Array(15).fill(0);
+ for (let i = 0; i < 15; i++) {
+ const btn = document.createElement('button');
+ btn.className = 'relay-btn' + (window.doorRelayState[i] ? ' on' : '');
+ btn.textContent = i + 1;
+ btn.onclick = () => {
+ window.doorRelayState[i] = window.doorRelayState[i] ? 0 : 1;
+ btn.classList.toggle('on', !!window.doorRelayState[i]);
+ sendCmd('ad', { ch: (i + 1), [`relay_${i + 1}`]: window.doorRelayState[i] });
+ };
+ el.appendChild(btn);
+ }
+}
+
+// ═══════════════════════════════════════════════════════════
+// [FIX 2] 스케줄 채널 확장 패널 초기화 및 상태 관리
+// AD 15ch / PB 8ch 개별 ON/OFF 설정, localStorage 영속 저장
+// ═══════════════════════════════════════════════════════════
+window.schedAdState = { m: Array(15).fill(1), n: Array(15).fill(1) };
+window.schedPbState = { m: Array(8).fill(1), n: Array(8).fill(1) };
+
+function initSchedChannelPanels() {
+ ['m', 'n'].forEach(suffix => {
+ // AD 릴레이 패널 (15ch)
+ const adGrid = document.getElementById(`sched-ad-relay-${suffix}`);
+ if (adGrid) {
+ adGrid.innerHTML = '';
+ for (let i = 0; i < 15; i++) {
+ const btn = document.createElement('button');
+ btn.className = 'sched-relay-btn on';
+ btn.textContent = i + 1;
+ btn.onclick = (function(idx) {
+ return function() {
+ window.schedAdState[suffix][idx] ^= 1;
+ this.classList.toggle('on', !!window.schedAdState[suffix][idx]);
+ saveSchedChannelState();
+ };
+ })(i);
+ adGrid.appendChild(btn);
+ }
+ }
+ // PB 채널 패널 (8ch)
+ const pbGrid = document.getElementById(`sched-pb-ch-${suffix}`);
+ if (pbGrid) {
+ pbGrid.innerHTML = '';
+ for (let i = 0; i < 8; i++) {
+ const div = document.createElement('div');
+ div.className = 'sched-pb-ch on';
+ div.innerHTML = `<div class="s-ch-label">CH ${i+1}</div><div class="s-ch-sw">ON</div>`;
+ div.onclick = (function(idx) {
+ return function() {
+ window.schedPbState[suffix][idx] ^= 1;
+ const isOn = !!window.schedPbState[suffix][idx];
+ this.classList.toggle('on', isOn);
+ this.querySelector('.s-ch-sw').textContent = isOn ? 'ON' : 'OFF';
+ saveSchedChannelState();
+ };
+ })(i);
+ pbGrid.appendChild(div);
+ }
+ }
+ });
+ loadSchedChannelState();
+}
+
+function toggleSchedPanel(key) {
+ const panel = document.getElementById(`sched-panel-${key}`);
+ if (panel) panel.classList.toggle('open');
+}
+
+function setSchedAdAll(suffix, state) {
+ window.schedAdState[suffix] = Array(15).fill(state);
+ const grid = document.getElementById(`sched-ad-relay-${suffix}`);
+ if (grid) grid.querySelectorAll('.sched-relay-btn').forEach(btn => btn.classList.toggle('on', state === 1));
+ saveSchedChannelState();
+}
+
+function setSchedPbAll(suffix, state) {
+ window.schedPbState[suffix] = Array(8).fill(state);
+ const grid = document.getElementById(`sched-pb-ch-${suffix}`);
+ if (grid) grid.querySelectorAll('.sched-pb-ch').forEach(div => {
+ div.classList.toggle('on', state === 1);
+ div.querySelector('.s-ch-sw').textContent = state === 1 ? 'ON' : 'OFF';
+ });
+ saveSchedChannelState();
+}
+
+function saveSchedChannelState() {
+ localStorage.setItem('shelter_sched_ad_ch', JSON.stringify(window.schedAdState));
+ localStorage.setItem('shelter_sched_pb_ch', JSON.stringify(window.schedPbState));
+}
+
+function loadSchedChannelState() {
+ const savedAd = localStorage.getItem('shelter_sched_ad_ch');
+ const savedPb = localStorage.getItem('shelter_sched_pb_ch');
+ if (savedAd) {
+ try {
+ window.schedAdState = JSON.parse(savedAd);
+ ['m','n'].forEach(suffix => {
+ const grid = document.getElementById(`sched-ad-relay-${suffix}`);
+ if (grid) grid.querySelectorAll('.sched-relay-btn').forEach((btn, i) => {
+ btn.classList.toggle('on', !!window.schedAdState[suffix][i]);
+ });
+ });
+ } catch(e) {}
+ }
+ if (savedPb) {
+ try {
+ window.schedPbState = JSON.parse(savedPb);
+ ['m','n'].forEach(suffix => {
+ const grid = document.getElementById(`sched-pb-ch-${suffix}`);
+ if (grid) grid.querySelectorAll('.sched-pb-ch').forEach((div, i) => {
+ const isOn = !!window.schedPbState[suffix][i];
+ div.classList.toggle('on', isOn);
+ div.querySelector('.s-ch-sw').textContent = isOn ? 'ON' : 'OFF';
+ });
+ });
+ } catch(e) {}
+ }
+}
+
+function updateDevice(key, data) {
+ if (!data) return;
+ const isOnline = data.conn === 1 || data.conn === true || data.status === 'ONLINE';
+ const badgeMap = {
+ ac: ['ac-badge', 'ctrl-ac-badge'], ap: ['ap-badge', 'ctrl-ap-badge'],
+ fan: ['fan-badge', 'ctrl-fan-badge'], ad: ['ad-badge', 'ctrl-ad-badge'],
+ dust: ['dust-badge'], th_in: ['th-in-badge'], th_out: ['th-out-badge'], pb: ['pb-badge']
+ };
+ if (badgeMap[key]) badgeMap[key].forEach(id => setBadge(id, isOnline));
+
+ if (key === 'state') {
+ document.getElementById('dash-online').textContent = isOnline ? '연결됨' : '오프라인';
+ const uid = data.uid || data.ip;
+ document.getElementById('dash-online-sub').textContent = uid ? ('UID: ' + uid) : '정상 관제 중';
+ }
+ if (key === 'ac') {
+ setText('ac-temp', data.temp); setText('ac-curr', data.curr); setText('ac-spd', data.spd);
+ setText('ac-err', data.err);
+ if (document.getElementById('ac-mode')) document.getElementById('ac-mode').textContent = data.mode ?? '—';
+ const tg1 = document.getElementById('ctrl-ac-toggle');
+ if (tg1 && data.pwr !== undefined) tg1.checked = (data.pwr === 1 || data.pwr === true);
+ const slider = document.getElementById('ctrl-ac-temp');
+ const lbl = document.getElementById('ctrl-ac-temp-val');
+ if (slider && data.temp !== undefined) { slider.value = Math.round(data.temp); if (lbl) lbl.textContent = Math.round(data.temp) + '°C'; }
+ const stTemp = document.getElementById('ctrl-ac-st-temp'); if (stTemp) stTemp.textContent = data.temp !== undefined ? Math.round(data.temp) + '°C' : '—';
+ const stCurr = document.getElementById('ctrl-ac-st-curr'); if (stCurr) stCurr.textContent = data.curr !== undefined ? Math.round(data.curr) + '°C' : '—';
+ const stMode = document.getElementById('ctrl-ac-st-mode'); if (stMode) stMode.textContent = (data.mode ?? '—') + ' / ' + (data.spd ?? '—');
+ const stErr = document.getElementById('ctrl-ac-st-err'); if (stErr) stErr.textContent = data.err !== undefined ? data.err : '—';
+ }
+ if (key === 'ap') {
+ setText('ap-co2', data.co2); setText('ap-pm25', data.pm25); setText('ap-filter', data.filter);
+ setText('ap-temp', data.temp); setText('ap-temp-out', data.temp_out); setText('ap-tvoc', data.tvoc);
+ if (document.getElementById('ap-mode')) document.getElementById('ap-mode').textContent = data.mode ?? '—';
+ const tg2 = document.getElementById('ctrl-ap-toggle');
+ if (tg2 && data.pwr !== undefined) tg2.checked = (data.pwr === 1 || data.pwr === true);
+ const stTemp = document.getElementById('ctrl-ap-st-temp'); if (stTemp) stTemp.textContent = data.temp !== undefined ? data.temp + '°C' : '—';
+ const stOut = document.getElementById('ctrl-ap-st-temp-out'); if (stOut) stOut.textContent = data.temp_out !== undefined ? data.temp_out + '°C' : '—';
+ const stTvoc = document.getElementById('ctrl-ap-st-tvoc'); if (stTvoc) stTvoc.textContent = (data.tvoc ?? '—') + ' / ' + (data.co2 ?? '—');
+ const stMode = document.getElementById('ctrl-ap-st-mode'); if (stMode) stMode.textContent = (data.mode ?? '—') + ' / ' + (data.spd ?? '—') + ' / UV' + (data.uv ?? 0);
+ }
+ if (key === 'fan') {
+ if (document.getElementById('fan-mode')) document.getElementById('fan-mode').textContent = data.mode ?? '—';
+ if (document.getElementById('fan-duty-val')) document.getElementById('fan-duty-val').innerText = (data.duty ?? '—') + ' %';
+ const btnAuto = document.getElementById('fan-btn-auto');
+ const btnManual = document.getElementById('fan-btn-manual');
+ if (data.mode === 'AUTO') {
+ if (btnAuto) btnAuto.classList.add('active'); if (btnManual) btnManual.classList.remove('active');
+ } else {
+ if (btnAuto) btnAuto.classList.remove('active'); if (btnManual) btnManual.classList.add('active');
+ }
+ const slider = document.getElementById('ctrl-fan-slider');
+ if (slider && data.duty !== undefined) slider.value = data.duty;
+ const outLabel = document.getElementById('ctrl-fan-out');
+ if (outLabel && data.duty !== undefined) outLabel.textContent = data.duty + '%';
+ }
+ if (key === 'dust') {
+ setText('s-pm1', data.pm1_0); setText('s-pm25', data.pm2_5); setText('s-pm10', data.pm10);
+ const dPm25 = document.getElementById('dash-pm25');
+ if (dPm25) dPm25.innerText = data.pm2_5 !== undefined ? data.pm2_5 : '—';
+ if (data.pm2_5 !== undefined && data.pm2_5 !== null) {
+ const val = parseInt(data.pm2_5);
+ const grade = val <= 15 ? '좋음 😊' : val <= 35 ? '보통 😐' : '나쁨 😷';
+ if (document.getElementById('s-dust-grade')) document.getElementById('s-dust-grade').textContent = val <= 15 ? '좋음' : '보통';
+ if (document.getElementById('dash-pm-grade')) document.getElementById('dash-pm-grade').textContent = grade;
+ }
+ }
+ if (key === 'th_in') {
+ setText('s-in-temp', data.temp); setText('s-in-humi', data.humi);
+ const dTemp = document.getElementById('dash-temp'); if (dTemp) dTemp.innerText = (data.temp ?? '—') + '°C';
+ const dHumi = document.getElementById('dash-humi'); if (dHumi) dHumi.innerText = '습도 ' + (data.humi ?? '—') + '%';
+ }
+ if (key === 'th_out') {
+ setText('s-out-temp', data.temp); setText('s-out-humi', data.humi);
+ const outTempMain = document.getElementById('dash-th-out-temp-main');
+ const outHumiSub = document.getElementById('dash-th-out-humi-sub');
+ if (outTempMain) outTempMain.innerText = (data.temp !== undefined ? data.temp : '—') + '°C';
+ if (outHumiSub) outHumiSub.innerText = '습도 ' + (data.humi !== undefined ? data.humi : '—') + '%';
+ }
+ // [FIX 3] 서버에서 AD 상태 수신 시 개별 relay-btn 동기화
+ if (key === 'ad' && data.relays) {
+ if (!window.doorRelayState) window.doorRelayState = Array(15).fill(0);
+ const grid = document.getElementById('ctrl-relay-grid');
+ if (grid) {
+ grid.querySelectorAll('.relay-btn').forEach((btn, i) => {
+ const st = data.relays[i] ? 1 : 0;
+ window.doorRelayState[i] = st;
+ btn.classList.toggle('on', st === 1);
+ });
+ }
+ }
+ if (key === 'pb' && data.channels) {
+ window._activeBid = data.current_b_id || 1;
+ const pbGrid = document.getElementById('pb-grid');
+ if (pbGrid && data.channels.length > 0) {
+ if (!window.pbSwitchState) window.pbSwitchState = Array(8).fill(0);
+ pbGrid.innerHTML = data.channels.map((ch, idx) => {
+ window.pbSwitchState[idx] = ch.sw ? 1 : 0;
+ const nextState = ch.sw ? 0 : 1;
+ return `
+ <div class="pb-ch ${ch.sw ? 'on' : ''}" style="cursor:pointer;" onclick="sendCmd('pb',{ch:${ch.ch},sw:${nextState}})">
+ <div class="ch-label">CH ${ch.ch}</div>
+ <div class="ch-sw">${ch.sw ? 'ON' : 'OFF'}</div>
+ <div class="ch-power">${ch.w} W</div>
+ <div style="font-size:10px; color:var(--text2); margin-top:2px;">${ch.c} A / ${ch.v} V</div>
+ </div>`;
+ }).join('');
+ }
+ if (window._currentStats) renderPowerChart(window._currentStats);
+ }
+}
+
+function updateScheduleTime(type) {
+ const inputId = type === 'morning' ? 'sched-time-morning' : 'sched-time-night';
+ const targetTime = document.getElementById(inputId).value;
+ if (!targetTime || !targetTime.includes(':')) { showToast('올바른 시간 포맷을 선택해 주세요.', 'error'); return; }
+ const suffix = type === 'morning' ? '-m' : '-n';
+ const deviceFlags = {
+ ac: document.getElementById(`sched-btn-ac${suffix}`)?.classList.contains('active') ?? true,
+ ap: document.getElementById(`sched-btn-ap${suffix}`)?.classList.contains('active') ?? true,
+ ad: document.getElementById(`sched-btn-ad${suffix}`)?.classList.contains('active') ?? true,
+ pb: document.getElementById(`sched-btn-pb${suffix}`)?.classList.contains('active') ?? true
+ };
+ localStorage.setItem(`shelter_sched_${type}`, targetTime);
+ localStorage.setItem(`shelter_sched_flags_4ch_${type}`, JSON.stringify(deviceFlags));
+ if (socket && socket.connected) {
+ socket.emit('update_schedule_config', { type, time: targetTime, flags: deviceFlags });
+ showToast(`${type === 'morning' ? '출근' : '퇴근'} 가변 타이머 설정 동기화 완료!`, 'success');
+ }
+}
+
+function loadSavedSchedules() {
+ const savedMorning = localStorage.getItem('shelter_sched_morning') || '07:00';
+ const savedNight = localStorage.getItem('shelter_sched_night') || '20:00';
+ if (document.getElementById('sched-time-morning')) document.getElementById('sched-time-morning').value = savedMorning;
+ if (document.getElementById('sched-time-night')) document.getElementById('sched-time-night').value = savedNight;
+ ['morning', 'night'].forEach(type => {
+ const savedFlagsStr = localStorage.getItem(`shelter_sched_flags_4ch_${type}`);
+ if (savedFlagsStr) {
+ try {
+ const flags = JSON.parse(savedFlagsStr);
+ const suffix = type === 'morning' ? '-m' : '-n';
+ ['ac', 'ap', 'ad', 'pb'].forEach(dev => {
+ const btn = document.getElementById(`sched-btn-${dev}${suffix}`);
+ if (btn) btn.classList.toggle('active', !!flags[dev]);
+ });
+ } catch(e) {}
+ }
+ });
+ setTimeout(() => {
+ if (socket && socket.connected) { updateScheduleTime('morning'); updateScheduleTime('night'); }
+ }, 1500);
+}
+
+function renderPowerChart(statsArray) {
+ window._currentStats = statsArray;
+ const chart = document.getElementById('power-bar-chart');
+ if (!chart) return;
+ const maxVal = Math.max(...statsArray, 10);
+ chart.innerHTML = statsArray.map((val, idx) => `
+ <div class="chart-bar-wrapper">
+ <div class="chart-bar" style="height:${(val / maxVal) * 80}%;" title="${val.toFixed(1)} W 누적"></div>
+ <div class="chart-label">${idx}시</div>
+ </div>`).join('');
+}
+
+function setBadge(id, conn) {
+ const el = document.getElementById(id); if (!el) return;
+ el.className = `status-badge ${conn ? 'online' : 'offline'}`;
+ el.textContent = conn ? '연결됨' : '오프라인';
+}
+
+function setText(id, val) {
+ const el = document.getElementById(id);
+ if (el) el.innerText = (val !== undefined && val !== null) ? val : '—';
+}
+
+function updateAll(state) {
+ if (!state) return;
+ if (state._hourlyPowerStats) window._currentStats = state._hourlyPowerStats;
+ ['ac', 'ap', 'fan', 'ad', 'dust', 'th_in', 'th_out', 'pb', 'state'].forEach(key => {
+ if (state[key]) updateDevice(key, state[key]);
+ });
+}
+
+function sendCmd(device, cmd) {
+ if (socket && socket.connected) {
+ socket.emit('control_cmd', { device, cmd });
+ } else {
+ showToast('중앙 제어 관제 서버와 웹소켓 세션이 연결되어 있지 않습니다.', 'error');
+ }
+}
+
+function refreshAll() {
+ if (socket) socket.emit('refresh_all');
+ showToast('전체 스마트쉘터 하드웨어 동기화 시퀀스를 강제 가동했습니다.', 'success');
+}
+
+function requestDeviceState(device) {
+ if (device === 'ac') sendCmd('ac', { get_ac: 'state' });
+ else if (device === 'ap') sendCmd('ap', { get_ap: 'state' });
+ else if (device === 'fan') sendCmd('fan', { get_fan: 'state' });
+}
+
+function runAcPresetTest() {
+ const temp = parseInt(document.getElementById('ctrl-ac-temp').value, 10) || 24;
+ sendCmd('ac', { set_ac: { pwr: 1, mode: 'COOL', temp, spd: 2 } });
+}
+
+function runApPresetTest() {
+ sendCmd('ap', { set_ap: { pwr: 1, mode: 'AUTO', spd: 2, uv: 0, filter_reset: 0, bypass: 0, timer: 0 } });
+}
+
+function runFullApAcTest() {
+ if (!confirm('AP+AC 순차 테스트를 실행합니다. 각 단계는 2초 간격으로 전송됩니다.')) return;
+ const steps = [
+  () => requestDeviceState('ap'),
+  () => sendCmd('ap', { pwr: 1, mode: 'AUTO', spd: 2 }),
+  () => runApPresetTest(),
+  () => requestDeviceState('ap'),
+  () => requestDeviceState('ac'),
+  () => sendCmd('ac', { pwr: 1, mode: 'COOL', temp: 24, spd: 2 }),
+  () => runAcPresetTest(),
+  () => requestDeviceState('ac')
+ ];
+ steps.forEach((fn, i) => setTimeout(fn, i * 2000));
+ showToast('AP+AC 순차 테스트 시작 (총 ' + (steps.length * 2) + '초)', 'success');
+}
+
+const pageTitles = {
+ dashboard: '대시보드 종합관제', sensors: '센서 모니터링 현황',
+ control: '스마트 장비 원격제어', power: '전원 관리 / 분전반',
+ schedule: '자동 제어 스케줄', logs: '실시간 MQTT 로그'
+};
+
+function navigate(page) {
+ document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+ document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+ const tPage = document.getElementById(`page-${page}`); if (tPage) tPage.classList.add('active');
+ const tNav = document.querySelector(`[onclick="navigate('${page}')"]`); if (tNav) tNav.classList.add('active');
+ const pTitle = document.getElementById('page-title'); if (pTitle) pTitle.textContent = pageTitles[page] || '시스템';
+}
+
+function updateClock() {
+ const now = new Date();
+ const cEl = document.getElementById('clock');
+ if (cEl) cEl.textContent = now.toLocaleDateString('ko-KR') + ' ' + now.toLocaleTimeString('ko-KR', { hour12: false });
+}
+setInterval(updateClock, 1000); updateClock();
+
+function showToast(msg, type = '') {
+ const t = document.getElementById('toast'); if (!t) return;
+ t.textContent = msg; t.className = `show ${type}`;
+ clearTimeout(t._timer); t._timer = setTimeout(() => t.className = '', 2800);
+}
+</script>
+</body>
+</html>

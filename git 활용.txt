@@ -1,0 +1,13 @@
+0. git 기록 완전 삭제 명령어 	rmdir /s /q .git 
+
+1. 데이터 올리기 
+git init
+git config --global --add safe.directory "D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final\MOS_version"
+git add .
+
+git commit -m "First upload: remove large installer"
+git branch -M main
+git remote add origin https://github.com/sanghyunchoi-choi/Shelter.git
+git push -u origin main --force
+
+2. 

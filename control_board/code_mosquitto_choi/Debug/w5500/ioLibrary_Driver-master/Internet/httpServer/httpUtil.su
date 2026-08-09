@@ -1,0 +1,4 @@
+../w5500/ioLibrary_Driver-master/Internet/httpServer/httpUtil.c:17:9:http_get_cgi_handler	32	static
+../w5500/ioLibrary_Driver-master/Internet/httpServer/httpUtil.c:37:9:http_post_cgi_handler	32	static
+../w5500/ioLibrary_Driver-master/Internet/httpServer/httpUtil.c:59:9:predefined_get_cgi_processor	24	static
+../w5500/ioLibrary_Driver-master/Internet/httpServer/httpUtil.c:63:9:predefined_set_cgi_processor	24	static

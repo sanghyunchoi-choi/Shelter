@@ -1,0 +1,14 @@
+{
+  "name": "shelter-cms-server",
+  "version": "1.0.0",
+  "description": "Smart Shelter CMS Node.js Broker Backend",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "mqtt": "^5.5.0",
+    "socket.io": "^4.7.5"
+  }
+}

@@ -1,0 +1,4 @@
+../Core/Src/phri/updm010ub.c:14:9:DUST_Init	2
+../Core/Src/phri/updm010ub.c:25:16:DUST_Verify_CS	2
+../Core/Src/phri/updm010ub.c:34:9:DUST_GetReadyData	2
+../Core/Src/phri/updm010ub.c:43:6:DUST_UART_ISR	9

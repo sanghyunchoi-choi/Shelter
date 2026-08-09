@@ -1,0 +1,4 @@
+../Core/Src/hw_adc.c:21:14:HW_ADC_Read_Sensor_V	1
+../Core/Src/hw_adc.c:34:6:HW_ADC_Init	2
+../Core/Src/hw_adc.c:50:6:HW_ADC_Calibrate_Zero	3
+../Core/Src/hw_adc.c:74:9:HW_Get_Current_mA	7

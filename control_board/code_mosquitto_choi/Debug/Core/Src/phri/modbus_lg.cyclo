@@ -1,0 +1,17 @@
+../Core/Src/phri/modbus_lg.c:24:13:ModbusSmReset	1
+../Core/Src/phri/modbus_lg.c:43:13:ModbusFlushRx	3
+../Core/Src/phri/modbus_lg.c:60:13:ModbusEnsureRxIT	2
+../Core/Src/phri/modbus_lg.c:71:6:Modbus_RestartRxIT	1
+../Core/Src/phri/modbus_lg.c:77:6:Modbus_Init	1
+../Core/Src/phri/modbus_lg.c:88:6:Modbus_UART_ISR	2
+../Core/Src/phri/modbus_lg.c:114:13:ModbusRawSend	2
+../Core/Src/phri/modbus_lg.c:130:6:ModbusSmInput	16
+../Core/Src/phri/modbus_lg.c:203:5:ModbusRequest	3
+../Core/Src/phri/modbus_lg.c:244:6:ModbusParse	15
+../Core/Src/phri/modbus_lg.c:281:13:getACStatusLocked	11
+../Core/Src/phri/modbus_lg.c:319:6:getACStatus	2
+../Core/Src/phri/modbus_lg.c:331:5:setACPower	3
+../Core/Src/phri/modbus_lg.c:339:5:setACMode	2
+../Core/Src/phri/modbus_lg.c:347:5:setACTemperature	2
+../Core/Src/phri/modbus_lg.c:355:5:setACWindSpeed	3
+../Core/Src/phri/modbus_lg.c:366:5:setACSpeed	1

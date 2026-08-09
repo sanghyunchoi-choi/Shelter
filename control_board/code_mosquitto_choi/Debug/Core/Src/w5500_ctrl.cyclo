@@ -1,0 +1,14 @@
+../Core/Src/w5500_ctrl.c:10:6:W5500_Select	1
+../Core/Src/w5500_ctrl.c:14:6:W5500_Deselect	1
+../Core/Src/w5500_ctrl.c:18:9:W5500_ReadByte	1
+../Core/Src/w5500_ctrl.c:24:6:W5500_WriteByte	1
+../Core/Src/w5500_ctrl.c:28:6:W5500_ReadBurst	1
+../Core/Src/w5500_ctrl.c:32:6:W5500_WriteBurst	1
+../Core/Src/w5500_ctrl.c:38:6:Board_GetDeviceUuid	3
+../Core/Src/w5500_ctrl.c:50:13:W5500_BuildMacFromUid	1
+../Core/Src/w5500_ctrl.c:73:6:W5500_PrintNetwork	3
+../Core/Src/w5500_ctrl.c:84:6:W5500_NetworkReady	5
+../Core/Src/w5500_ctrl.c:179:13:W5500_ApplyStatic	1
+../Core/Src/w5500_ctrl.c:200:6:W5500_ApplyNetwork	1
+../Core/Src/w5500_ctrl.c:209:6:W5500_Interrupt_Config	1
+../Core/Src/w5500_ctrl.c:214:6:W5500_Init	3

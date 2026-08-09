@@ -1,0 +1,2 @@
+../Core/Src/protocol.c:8:9:Calculate_BCC	8	static
+../Core/Src/protocol.c:23:6:Build_Report_Packet	24	static

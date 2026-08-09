@@ -1,0 +1,10 @@
+../Core/Src/phri/25LC256.c:18:6:EEPROM_SPI_INIT	1
+../Core/Src/phri/25LC256.c:23:18:EEPROM_SPI_WritePage	5
+../Core/Src/phri/25LC256.c:83:18:EEPROM_SPI_WriteBuffer	16
+../Core/Src/phri/25LC256.c:199:18:EEPROM_SPI_ReadBuffer	3
+../Core/Src/phri/25LC256.c:237:9:EEPROM_SendByte	5
+../Core/Src/phri/25LC256.c:268:6:sEE_WriteEnable	1
+../Core/Src/phri/25LC256.c:286:6:sEE_WriteDisable	1
+../Core/Src/phri/25LC256.c:305:6:sEE_WriteStatusRegister	1
+../Core/Src/phri/25LC256.c:335:9:EEPROM_SPI_WaitStandbyState	3
+../Core/Src/phri/25LC256.c:368:6:EEPROM_SPI_SendInstruction	3

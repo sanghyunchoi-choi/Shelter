@@ -1,0 +1,10 @@
+../Core/Src/app_loop.c:33:6:Sync_RTC_With_NTP	6
+../Core/Src/app_loop.c:77:6:Is_PowerBoard_Online	1
+../Core/Src/app_loop.c:86:6:Is_AP_Online	1
+../Core/Src/app_loop.c:95:6:Is_AC_Online	1
+../Core/Src/app_loop.c:104:6:Is_Sensor_Online	3
+../Core/Src/app_loop.c:108:6:RLY_SetStatus	3
+../Core/Src/app_loop.c:125:6:RLY_GetStatus	3
+../Core/Src/app_loop.c:129:6:RLY_All_Reset	3
+../Core/Src/app_loop.c:167:6:SCAN_External_Inputs	5
+../Core/Src/app_loop.c:191:6:SCAN_Switch_Configuration	4

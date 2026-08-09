@@ -1,0 +1,4 @@
+../Core/Src/hw_io.c:10:6:HW_Relay_Set	8	static
+../Core/Src/hw_io.c:15:6:App_Relay_Test	24	static
+../Core/Src/hw_io.c:41:9:HW_Get_BoardID	8	static
+../Core/Src/hw_io.c:54:6:HW_RS485_TX_Mode	8	static
