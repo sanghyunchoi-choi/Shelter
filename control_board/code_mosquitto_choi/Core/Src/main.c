@@ -1129,7 +1129,7 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOD_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOC, RTX_DIR4_Pin|RTX_DIR2_Pin|rly_1_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOC, RTX_DIR4_Pin|RTX_DIR2_Pin|WIZ_RST_Pin|rly_1_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOA, WIZ_CS_Pin|RTX_DIR1_Pin, GPIO_PIN_RESET);
@@ -1148,8 +1148,8 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOE, rly_12_Pin|rly_13_Pin|rly_14_Pin|rly_15_Pin, GPIO_PIN_RESET);
 
-  /*Configure GPIO pins : RTX_DIR4_Pin RTX_DIR2_Pin rly_1_Pin */
-  GPIO_InitStruct.Pin = RTX_DIR4_Pin|RTX_DIR2_Pin|rly_1_Pin;
+  /*Configure GPIO pins : RTX_DIR4_Pin RTX_DIR2_Pin WIZ_RST_Pin rly_1_Pin */
+  GPIO_InitStruct.Pin = RTX_DIR4_Pin|RTX_DIR2_Pin|WIZ_RST_Pin|rly_1_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
@@ -1209,6 +1209,9 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
+
+  /*AnalogSwitch Config */
+  HAL_SYSCFG_AnalogSwitchConfig(SYSCFG_SWITCH_PC3, SYSCFG_SWITCH_PC3_CLOSE);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 

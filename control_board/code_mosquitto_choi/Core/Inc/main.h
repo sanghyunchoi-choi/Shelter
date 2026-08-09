@@ -64,6 +64,8 @@ void Error_Handler(void);
 #define RTX_DIR4_GPIO_Port GPIOC
 #define RTX_DIR2_Pin GPIO_PIN_1
 #define RTX_DIR2_GPIO_Port GPIOC
+#define WIZ_RST_Pin GPIO_PIN_3
+#define WIZ_RST_GPIO_Port GPIOC
 #define WIZ_CS_Pin GPIO_PIN_4
 #define WIZ_CS_GPIO_Port GPIOA
 #define WIZ_SCK_Pin GPIO_PIN_5

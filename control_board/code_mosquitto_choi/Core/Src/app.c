@@ -238,10 +238,18 @@ void StartMQTTTask(void *argument)
 	/* NTP는 최초 1회 + 이후 24시간 간격으로만 동기화 */
 	static uint32_t last_ntp_sync_tick = 0;
 #define NTP_SYNC_INTERVAL_MS  (24UL * 60UL * 60UL * 1000UL)  // 24시간
+	uint32_t last_dhcp_tick = HAL_GetTick();
 
 	for (;;) {
 		is_mqtt_connected = false;
 		uint8_t ip[4];
+
+#if SHELTER_NET_USE_DHCP
+if (HAL_GetTick() - last_dhcp_tick >= 1000) {
+    last_dhcp_tick = HAL_GetTick();
+    W5500_DhcpTick();
+}
+#endif
 
 		/* [Step 1] 물리 소켓 완전 초기화 (Zombie Connection 방지) */
 		if (getSn_SR(MQTT_SOCKET_NUM) != SOCK_CLOSED) {

@@ -4,9 +4,9 @@
 #include <string.h>
 #include "cmsis_os2.h"
 #include "dhcp.h"
+#include "socket.h"
 
 /* --- 로우 레벨 SPI --- */
-
 void W5500_Select(void) {
     HAL_GPIO_WritePin(WIZ_CS_GPIO_Port, WIZ_CS_Pin, GPIO_PIN_RESET);
 }
@@ -16,7 +16,7 @@ void W5500_Deselect(void) {
 }
 
 uint8_t W5500_ReadByte(void) {
-    uint8_t rb;
+    uint8_t rb = 0;
     HAL_SPI_Receive(&hspi1, &rb, 1, HAL_MAX_DELAY);
     return rb;
 }
@@ -34,7 +34,6 @@ void W5500_WriteBurst(uint8_t* pBuf, uint16_t len) {
 }
 
 /* --- UID / MAC --- */
-
 void Board_GetDeviceUuid(char *out, size_t out_len)
 {
     if (out == NULL || out_len < SHELTER_DEVICE_UID_LEN) {
@@ -101,6 +100,22 @@ bool W5500_NetworkReady(uint8_t *ip_out4)
 static uint8_t s_dhcp_buf[1024];
 static bool s_dhcp_started = false;
 
+/* [정석 복구] IP 할당 완료 콜백 연산 안전화 */
+static void cb_dhcp_ip_assign(void) {
+    wiz_NetInfo ni;
+    getIPfromDHCP(ni.ip);
+    getGWfromDHCP(ni.gw);
+    getSNfromDHCP(ni.sn);
+    getDNSfromDHCP(ni.dns);
+    ni.dhcp = NETINFO_DHCP;
+    W5500_BuildMacFromUid(ni.mac);
+    wizchip_setnetinfo(&ni);
+}
+
+static void cb_dhcp_ip_conflict(void) {
+    printf("[W5500] DHCP IP Conflict!\r\n");
+}
+
 static bool W5500_ApplyDhcp(void)
 {
     wiz_NetInfo ni;
@@ -115,64 +130,44 @@ static bool W5500_ApplyDhcp(void)
     ni.dhcp = NETINFO_DHCP;
     wizchip_setnetinfo(&ni);
 
+    close(SHELTER_DHCP_SOCKET_NUM);
+    reg_dhcp_cbfunc(cb_dhcp_ip_assign, cb_dhcp_ip_assign, cb_dhcp_ip_conflict);
+
     DHCP_init(SHELTER_DHCP_SOCKET_NUM, s_dhcp_buf);
     s_dhcp_started = true;
 
-    uint32_t start = HAL_GetTick();
-    while ((HAL_GetTick() - start) < SHELTER_DHCP_TIMEOUT_MS) {
-        if ((getPHYCFGR() & 0x01) == 0) {
-            osDelay(200);
-            continue;
-        }
-
-        DHCP_time_handler();
-        uint8_t ret = DHCP_run();
-
-        if (ret == DHCP_IP_ASSIGN || ret == DHCP_IP_CHANGED) {
-            getIPfromDHCP(ni.ip);
-            getGWfromDHCP(ni.gw);
-            getSNfromDHCP(ni.sn);
-            getDNSfromDHCP(ni.dns);
-            ni.dhcp = NETINFO_DHCP;
-            W5500_BuildMacFromUid(ni.mac);
-            wizchip_setnetinfo(&ni);
-            W5500_PrintNetwork("DHCP OK");
-            return true;
-        }
-        if (ret == DHCP_FAILED) {
-            break;
-        }
-        osDelay(10);
-    }
-
-    printf("[W5500] DHCP timeout/fail\r\n");
-    return false;
+    printf("[W5500] DHCP Engine Armed. Passing control to FreeRTOS Loop...\r\n");
+    return true;
 }
 
+/*
+ * [교정 핵심] 외부(StartMQTTTask)에서 이미 1초 필터를 거쳐서 들어오므로,
+ * 내부의 중복된 1초 밀리초 계산 가드를 완전히 삭제합니다.
+ * 들어올 때마다 무조건 1초가 증가하도록 직결 처리하여 상태 머신을 깨웁니다.
+ */
 void W5500_DhcpTick(void)
 {
-    if (!s_dhcp_started) {
-        return;
-    }
-    if ((getPHYCFGR() & 0x01) == 0) {
+    if (!s_dhcp_started) return;
+    if ((getPHYCFGR() & 0x01) == 0) return; // 링크 오프 시 스킵
+
+    // [핵심 가드 추가] 이미 유효한 IP를 성공적으로 받아온 상태라면,
+    // MQTT 소켓을 보호하기 위해 백그라운드 DHCP 상태 머신 구동을 완전히 패스(Skip)시킵니다.
+    uint8_t current_ip[4];
+    getSIPR(current_ip);
+    if (current_ip[0] != 0 && current_ip[0] != 255) {
+        // 이미 192.168.x.x 같은 정상 IP가 세팅되어 있다면
+        // 더 이상 DHCP_run()을 실행하지 않고 즉시 리턴하여 MQTT 소켓을 보호합니다.
         return;
     }
 
     DHCP_time_handler();
+
     uint8_t ret = DHCP_run();
     if (ret == DHCP_IP_ASSIGN || ret == DHCP_IP_CHANGED) {
-        wiz_NetInfo ni;
-        wizchip_getnetinfo(&ni);
-        getIPfromDHCP(ni.ip);
-        getGWfromDHCP(ni.gw);
-        getSNfromDHCP(ni.sn);
-        getDNSfromDHCP(ni.dns);
-        ni.dhcp = NETINFO_DHCP;
-        W5500_BuildMacFromUid(ni.mac);
-        wizchip_setnetinfo(&ni);
-        W5500_PrintNetwork("DHCP renew");
+        W5500_PrintNetwork("DHCP SUCCESS");
     }
 }
+
 #endif /* SHELTER_NET_USE_DHCP */
 
 #if SHELTER_NET_USE_STATIC
@@ -214,6 +209,11 @@ void W5500_Interrupt_Config(void) {
 void W5500_Init(void) {
     printf("--- W5500 init ---\r\n");
 
+    HAL_GPIO_WritePin(WIZ_RST_GPIO_Port, WIZ_RST_Pin, GPIO_PIN_RESET);
+    for(volatile uint32_t i=0; i<500000; i++);
+    HAL_GPIO_WritePin(WIZ_RST_GPIO_Port, WIZ_RST_Pin, GPIO_PIN_SET);
+    for(volatile uint32_t i=0; i<2500000; i++);
+
     reg_wizchip_cs_cbfunc(W5500_Select, W5500_Deselect);
     reg_wizchip_spi_cbfunc(W5500_ReadByte, W5500_WriteByte);
     reg_wizchip_spiburst_cbfunc(W5500_ReadBurst, W5500_WriteBurst);
@@ -226,5 +226,7 @@ void W5500_Init(void) {
 
     if (getVERSIONR() != 0x04) {
         printf("[W5500] not found (read 0x%02X)\r\n", getVERSIONR());
+    } else {
+        printf("[W5500] Chip version verified: 0x04\r\n");
     }
 }

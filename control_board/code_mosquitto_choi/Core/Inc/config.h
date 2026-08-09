@@ -10,8 +10,8 @@
 /* =============================================================================
  * 1) LAN 모드 — 아래 둘 중 하나만 1
  * ============================================================================= */
-#define SHELTER_NET_USE_STATIC   1
-#define SHELTER_NET_USE_DHCP     0
+#define SHELTER_NET_USE_STATIC   0
+#define SHELTER_NET_USE_DHCP     1
 
 #if (SHELTER_NET_USE_STATIC + SHELTER_NET_USE_DHCP) != 1
 #error "config.h: STATIC 또는 DHCP 중 정확히 하나만 1"
@@ -25,7 +25,7 @@
 
 /* DHCP일 때만 사용 */
 #define SHELTER_DHCP_TIMEOUT_MS  30000U
-#define SHELTER_DHCP_SOCKET_NUM  7
+#define SHELTER_DHCP_SOCKET_NUM  0
 
 /* =============================================================================
  * 2) MQTT 브로커 (제어보드가 접속하는 PC/서버)

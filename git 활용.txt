@@ -16,7 +16,7 @@ D:\2026.05.08\2025_project\2)smarttech\Project\Shelter\2026.05.25_final\MOS_vers
 
 git status
 git add .
-git commit -m "[수정한 날짜] 어떤 부분을 수정했는지 간단히 적기"
+git commit -m "[0809] DHCP 변경"
 git push origin main
 
 ==================================================================================
