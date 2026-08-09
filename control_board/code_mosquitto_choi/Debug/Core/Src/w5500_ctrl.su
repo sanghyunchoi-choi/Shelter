@@ -11,7 +11,7 @@
 ../Core/Src/w5500_ctrl.c:104:13:cb_dhcp_ip_assign	32	static
 ../Core/Src/w5500_ctrl.c:115:13:cb_dhcp_ip_conflict	8	static
 ../Core/Src/w5500_ctrl.c:119:13:W5500_ApplyDhcp	40	static
-../Core/Src/w5500_ctrl.c:148:6:W5500_DhcpTick	16	static
-../Core/Src/w5500_ctrl.c:195:6:W5500_ApplyNetwork	8	static
-../Core/Src/w5500_ctrl.c:204:6:W5500_Interrupt_Config	8	static
-../Core/Src/w5500_ctrl.c:209:6:W5500_Init	40	static
+../Core/Src/w5500_ctrl.c:145:6:W5500_DhcpTick	16	static
+../Core/Src/w5500_ctrl.c:224:6:W5500_ApplyNetwork	8	static
+../Core/Src/w5500_ctrl.c:233:6:W5500_Interrupt_Config	8	static
+../Core/Src/w5500_ctrl.c:238:6:W5500_Init	40	static

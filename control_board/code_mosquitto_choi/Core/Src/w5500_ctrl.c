@@ -139,34 +139,63 @@ static bool W5500_ApplyDhcp(void)
     printf("[W5500] DHCP Engine Armed. Passing control to FreeRTOS Loop...\r\n");
     return true;
 }
-
-/*
- * [교정 핵심] 외부(StartMQTTTask)에서 이미 1초 필터를 거쳐서 들어오므로,
- * 내부의 중복된 1초 밀리초 계산 가드를 완전히 삭제합니다.
- * 들어올 때마다 무조건 1초가 증가하도록 직결 처리하여 상태 머신을 깨웁니다.
+/**
+ * @brief FreeRTOS 1초 주기 태스크(StartAppTimeTask)에서 상시 호출되는 DHCP 핵심 엔진
  */
 void W5500_DhcpTick(void)
 {
+    // DHCP 기능이 기동되지 않았거나 랜 케이블이 분리된 상태라면 무조건 스킵
     if (!s_dhcp_started) return;
-    if ((getPHYCFGR() & 0x01) == 0) return; // 링크 오프 시 스킵
+    if ((getPHYCFGR() & 0x01) == 0) return;
 
-    // [핵심 가드 추가] 이미 유효한 IP를 성공적으로 받아온 상태라면,
-    // MQTT 소켓을 보호하기 위해 백그라운드 DHCP 상태 머신 구동을 완전히 패스(Skip)시킵니다.
-    uint8_t current_ip[4];
-    getSIPR(current_ip);
-    if (current_ip[0] != 0 && current_ip[0] != 255) {
-        // 이미 192.168.x.x 같은 정상 IP가 세팅되어 있다면
-        // 더 이상 DHCP_run()을 실행하지 않고 즉시 리턴하여 MQTT 소켓을 보호합니다.
-        return;
-    }
-
+    // 1. W5500 DHCP 라이브러리 내부 핵심 시계(초 카운터)는 1초마다 무조건 갱신되어야 합니다.
     DHCP_time_handler();
 
+    // 2. 외부 라이브러리 링크 에러를 차단하기 위한 우리 측 고유 1초 정적 누적 카운터
+    static uint32_t leased_seconds = 0;
+
+    // 3. W5500 내부 IP 레지스터를 실시간으로 직접 조회하여 현재 개통 상태를 체크
+    uint8_t current_ip[4];
+    getSIPR(current_ip);
+
+    // [교정 핵심] 유효한 사설 IP(192.168.x.x 등 0과 255가 아닌 진짜 IP)를 이미 들고 있는 상황에서만 가드를 켭니다!
+    if (current_ip[0] != 0 && current_ip[0] != 255) {
+
+        leased_seconds++; // 1초씩 누적 타이머 가동
+
+        /*
+         * [코어 가드 규칙]
+         * IP를 성공적으로 들고 있는 안정을 취한 상태라면, 최소 30분(1800초) 동안은
+         * 백그라운드 DHCP_run()의 불필요한 구동을 원천 차단하여 MQTT 소켓을 100% 보호합니다.
+         */
+        if (leased_seconds < 1800) {
+            return; // 30분 임계점 도달 전까지는 얌전하게 침묵 유지 (MQTT 간섭 0%)
+        }
+    } else {
+        // 부팅 직후이거나 IP가 0.0.0.0 혹은 유실된 상태라면 가드를 가동하지 않고
+        // 아래의 DHCP_run()으로 즉시 직결 통과시켜서 공유기한테 IP를 얻어오게 만듭니다.
+        leased_seconds = 0;
+    }
+
+    /*
+     * 4. 30분 마진이 초과했거나, 부팅 직후 최초 IP가 없는 단계일 때만 문이 열려 진입합니다.
+     *    공유기(DHCP 서버)단에 연장 신청(REQUEST) 또는 최초 할당(DISCOVER) 패킷을 송신합니다.
+     */
     uint8_t ret = DHCP_run();
+
+    // 공유기 수락으로 최초 할당 또는 연장 계약이 무사히 체결 완료된 시점
     if (ret == DHCP_IP_ASSIGN || ret == DHCP_IP_CHANGED) {
         W5500_PrintNetwork("DHCP SUCCESS");
+
+        // IP 획득에 성공했으므로 카운터를 다시 0으로 비워 다음 30분간 MQTT 소켓을 완벽 차단 보호함
+        leased_seconds = 0;
     }
 }
+
+
+
+
+
 
 #endif /* SHELTER_NET_USE_DHCP */
 
