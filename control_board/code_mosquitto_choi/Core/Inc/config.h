@@ -18,9 +18,9 @@
 #endif
 
 /* Static일 때만 사용 (DHCP면 무시됨) */
-#define SHELTER_NET_IP           {192, 168, 50, 50}
+#define SHELTER_NET_IP           {192, 168, 0, 50}			// 제어 보드 IP
 #define SHELTER_NET_SUBNET       {255, 255, 255, 0}
-#define SHELTER_NET_GATEWAY      {192, 168, 50, 1}
+#define SHELTER_NET_GATEWAY      {192, 168, 0, 1}
 #define SHELTER_NET_DNS          {8, 8, 8, 8}
 
 /* DHCP일 때만 사용 */
@@ -31,7 +31,8 @@
  * 2) MQTT 브로커 (제어보드가 접속하는 PC/서버)
  * ============================================================================= */
 //#define SHELTER_MQTT_BROKER_IP   {192, 168, 50, 220}
-#define SHELTER_MQTT_BROKER_IP   {192, 168, 50, 177}
+//#define SHELTER_MQTT_BROKER_IP   {192, 168, 50, 177}
+#define SHELTER_MQTT_BROKER_IP   {192, 168, 0, 107}
 #define SHELTER_MQTT_BROKER_PORT 1883
 
 /* =============================================================================

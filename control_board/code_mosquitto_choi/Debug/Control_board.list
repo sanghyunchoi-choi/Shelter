@@ -35,9 +35,9 @@ Idx Name          Size      VMA       LMA       File off  Algn
                   CONTENTS, READONLY, DEBUGGING, OCTETS
  15 .debug_line   0003e625  00000000  00000000  000afb26  2**0
                   CONTENTS, READONLY, DEBUGGING, OCTETS
- 16 .debug_str    0018451a  00000000  00000000  000ee14b  2**0
+ 16 .debug_str    00184517  00000000  00000000  000ee14b  2**0
                   CONTENTS, READONLY, DEBUGGING, OCTETS
- 17 .comment      00000043  00000000  00000000  00272665  2**0
+ 17 .comment      00000043  00000000  00000000  00272662  2**0
                   CONTENTS, READONLY
  18 .debug_frame  0000c54c  00000000  00000000  002726a8  2**2
                   CONTENTS, READONLY, DEBUGGING, OCTETS
@@ -1902,7 +1902,7 @@ void StartMQTTTask(void *argument)
  800140c:	08021860 	.word	0x08021860
  8001410:	08021864 	.word	0x08021864
  8001414:	08021888 	.word	0x08021888
- 8001418:	b132a8c0 	.word	0xb132a8c0
+ 8001418:	6b00a8c0 	.word	0x6b00a8c0
  800141c:	08021890 	.word	0x08021890
  8001420:	24000d1c 	.word	0x24000d1c
  8001424:	240003fc 	.word	0x240003fc
@@ -14413,8 +14413,8 @@ static bool W5500_ApplyStatic(void)
  8007386:	46bd      	mov	sp, r7
  8007388:	bd80      	pop	{r7, pc}
  800738a:	bf00      	nop
- 800738c:	3232a8c0 	.word	0x3232a8c0
- 8007390:	0132a8c0 	.word	0x0132a8c0
+ 800738c:	3200a8c0 	.word	0x3200a8c0
+ 8007390:	0100a8c0 	.word	0x0100a8c0
  8007394:	08022740 	.word	0x08022740
 
 08007398 <W5500_ApplyNetwork>:

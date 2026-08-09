@@ -727,7 +727,7 @@ Discarded input sections
  .debug_macro   0x00000000       0x46 ./Core/Src/freertos.o
  .debug_macro   0x00000000      0x178 ./Core/Src/freertos.o
  .debug_line    0x00000000      0xeee ./Core/Src/freertos.o
- .debug_str     0x00000000   0x16c9de ./Core/Src/freertos.o
+ .debug_str     0x00000000   0x16c9db ./Core/Src/freertos.o
  .comment       0x00000000       0x44 ./Core/Src/freertos.o
  .ARM.attributes
                 0x00000000       0x32 ./Core/Src/freertos.o
@@ -2110,7 +2110,7 @@ Discarded input sections
  .debug_macro   0x00000000       0x46 ./Core/Src/uart_test.o
  .debug_macro   0x00000000      0x178 ./Core/Src/uart_test.o
  .debug_line    0x00000000      0xda2 ./Core/Src/uart_test.o
- .debug_str     0x00000000   0x1692df ./Core/Src/uart_test.o
+ .debug_str     0x00000000   0x1692dc ./Core/Src/uart_test.o
  .comment       0x00000000       0x44 ./Core/Src/uart_test.o
  .debug_frame   0x00000000       0x38 ./Core/Src/uart_test.o
  .ARM.attributes
@@ -2517,7 +2517,7 @@ Discarded input sections
  .debug_macro   0x00000000      0x178 ./Core/Src/phri/25LC256.o
  .debug_macro   0x00000000       0x46 ./Core/Src/phri/25LC256.o
  .debug_line    0x00000000      0xfb8 ./Core/Src/phri/25LC256.o
- .debug_str     0x00000000   0x16968d ./Core/Src/phri/25LC256.o
+ .debug_str     0x00000000   0x16968a ./Core/Src/phri/25LC256.o
  .comment       0x00000000       0x44 ./Core/Src/phri/25LC256.o
  .debug_frame   0x00000000      0x17c ./Core/Src/phri/25LC256.o
  .ARM.attributes
@@ -16090,61 +16090,61 @@ LOAD C:/ST/STM32CubeIDE_1.19.0/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.ext
  .debug_line    0x0003d326      0x768 ./w5500/ioLibrary_Driver-master/Internet/MQTT/MQTTPacket/src/MQTTSubscribeClient.o
  .debug_line    0x0003da8e      0xb97 ./w5500/ioLibrary_Driver-master/Internet/SNTP/sntp.o
 
-.debug_str      0x00000000   0x18451a
- .debug_str     0x00000000   0x18451a ./Core/Src/app.o
-                             0x16ea5b (size before relaxing)
- .debug_str     0x0018451a   0x16c847 ./Core/Src/app_loop.o
- .debug_str     0x0018451a   0x16fa5c ./Core/Src/main.o
- .debug_str     0x0018451a   0x169cea ./Core/Src/mqtt_handler.o
- .debug_str     0x0018451a   0x16abb2 ./Core/Src/stm32h7xx_hal_msp.o
- .debug_str     0x0018451a   0x168824 ./Core/Src/stm32h7xx_hal_timebase_tim.o
- .debug_str     0x0018451a   0x169629 ./Core/Src/stm32h7xx_it.o
- .debug_str     0x0018451a     0x9a7e ./Core/Src/syscalls.o
- .debug_str     0x0018451a     0x781c ./Core/Src/sysmem.o
- .debug_str     0x0018451a   0x167b97 ./Core/Src/system_stm32h7xx.o
- .debug_str     0x0018451a   0x16c3bd ./Core/Src/w5500_ctrl.o
- .debug_str     0x0018451a     0x4299 ./Core/Src/phri/crc.o
- .debug_str     0x0018451a   0x16947f ./Core/Src/phri/cwt_th03s.o
- .debug_str     0x0018451a   0x16bf90 ./Core/Src/phri/ds3231m.o
- .debug_str     0x0018451a   0x16939a ./Core/Src/phri/hcsd.o
- .debug_str     0x0018451a   0x169a88 ./Core/Src/phri/himpel.o
- .debug_str     0x0018451a   0x169841 ./Core/Src/phri/modbus_lg.o
- .debug_str     0x0018451a   0x169554 ./Core/Src/phri/power_board.o
- .debug_str     0x0018451a   0x1693ac ./Core/Src/phri/updm010ub.o
- .debug_str     0x0018451a       0xc0 ./Core/Startup/startup_stm32h743zitx.o
- .debug_str     0x0018451a   0x168a6e ./Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal.o
- .debug_str     0x0018451a   0x1684a9 ./Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_cortex.o
- .debug_str     0x0018451a   0x168292 ./Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_dma.o
- .debug_str     0x0018451a   0x167b0f ./Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_gpio.o
- .debug_str     0x0018451a   0x168bb0 ./Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_i2c.o
- .debug_str     0x0018451a   0x167f54 ./Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_i2c_ex.o
- .debug_str     0x0018451a   0x167fd0 ./Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_pwr_ex.o
- .debug_str     0x0018451a   0x167ef3 ./Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_rcc.o
- .debug_str     0x0018451a   0x1683d4 ./Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_rcc_ex.o
- .debug_str     0x0018451a   0x167caa ./Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_rtc.o
- .debug_str     0x0018451a   0x168217 ./Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_spi.o
- .debug_str     0x0018451a   0x168c92 ./Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_tim.o
- .debug_str     0x0018451a   0x1685ba ./Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_tim_ex.o
- .debug_str     0x0018451a   0x168a34 ./Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_uart.o
- .debug_str     0x0018451a   0x167ff4 ./Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_uart_ex.o
- .debug_str     0x0018451a   0x16fa33 ./Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2/cmsis_os2.o
- .debug_str     0x0018451a     0xaccd ./Middlewares/Third_Party/FreeRTOS/Source/list.o
- .debug_str     0x0018451a     0xc80d ./Middlewares/Third_Party/FreeRTOS/Source/queue.o
- .debug_str     0x0018451a     0xd612 ./Middlewares/Third_Party/FreeRTOS/Source/tasks.o
- .debug_str     0x0018451a     0xd05e ./Middlewares/Third_Party/FreeRTOS/Source/timers.o
- .debug_str     0x0018451a     0xba0b ./Middlewares/Third_Party/FreeRTOS/Source/portable/GCC/ARM_CM4F/port.o
- .debug_str     0x0018451a     0xb60f ./Middlewares/Third_Party/FreeRTOS/Source/portable/MemMang/heap_4.o
- .debug_str     0x0018451a     0x6ce9 ./w5500/ioLibrary_Driver-master/Ethernet/W5500/w5500.o
- .debug_str     0x0018451a     0x7976 ./w5500/ioLibrary_Driver-master/Ethernet/socket.o
- .debug_str     0x0018451a     0x7702 ./w5500/ioLibrary_Driver-master/Ethernet/wizchip_conf.o
- .debug_str     0x0018451a     0x836e ./w5500/ioLibrary_Driver-master/Internet/MQTT/MQTTClient.o
- .debug_str     0x0018451a     0x74e8 ./w5500/ioLibrary_Driver-master/Internet/MQTT/mqtt_interface.o
- .debug_str     0x0018451a     0x74d7 ./w5500/ioLibrary_Driver-master/Internet/MQTT/MQTTPacket/src/MQTTConnectClient.o
- .debug_str     0x0018451a     0x7310 ./w5500/ioLibrary_Driver-master/Internet/MQTT/MQTTPacket/src/MQTTDeserializePublish.o
- .debug_str     0x0018451a     0x73d7 ./w5500/ioLibrary_Driver-master/Internet/MQTT/MQTTPacket/src/MQTTPacket.o
- .debug_str     0x0018451a     0x73b4 ./w5500/ioLibrary_Driver-master/Internet/MQTT/MQTTPacket/src/MQTTSerializePublish.o
- .debug_str     0x0018451a     0x73af ./w5500/ioLibrary_Driver-master/Internet/MQTT/MQTTPacket/src/MQTTSubscribeClient.o
- .debug_str     0x0018451a     0xab50 ./w5500/ioLibrary_Driver-master/Internet/SNTP/sntp.o
+.debug_str      0x00000000   0x184517
+ .debug_str     0x00000000   0x184517 ./Core/Src/app.o
+                             0x16ea58 (size before relaxing)
+ .debug_str     0x00184517   0x16c844 ./Core/Src/app_loop.o
+ .debug_str     0x00184517   0x16fa59 ./Core/Src/main.o
+ .debug_str     0x00184517   0x169ce7 ./Core/Src/mqtt_handler.o
+ .debug_str     0x00184517   0x16abaf ./Core/Src/stm32h7xx_hal_msp.o
+ .debug_str     0x00184517   0x168824 ./Core/Src/stm32h7xx_hal_timebase_tim.o
+ .debug_str     0x00184517   0x169626 ./Core/Src/stm32h7xx_it.o
+ .debug_str     0x00184517     0x9a7e ./Core/Src/syscalls.o
+ .debug_str     0x00184517     0x781c ./Core/Src/sysmem.o
+ .debug_str     0x00184517   0x167b97 ./Core/Src/system_stm32h7xx.o
+ .debug_str     0x00184517   0x16c3ba ./Core/Src/w5500_ctrl.o
+ .debug_str     0x00184517     0x4299 ./Core/Src/phri/crc.o
+ .debug_str     0x00184517   0x16947c ./Core/Src/phri/cwt_th03s.o
+ .debug_str     0x00184517   0x16bf90 ./Core/Src/phri/ds3231m.o
+ .debug_str     0x00184517   0x169397 ./Core/Src/phri/hcsd.o
+ .debug_str     0x00184517   0x169a85 ./Core/Src/phri/himpel.o
+ .debug_str     0x00184517   0x16983e ./Core/Src/phri/modbus_lg.o
+ .debug_str     0x00184517   0x169551 ./Core/Src/phri/power_board.o
+ .debug_str     0x00184517   0x1693a9 ./Core/Src/phri/updm010ub.o
+ .debug_str     0x00184517       0xc0 ./Core/Startup/startup_stm32h743zitx.o
+ .debug_str     0x00184517   0x168a6e ./Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal.o
+ .debug_str     0x00184517   0x1684a9 ./Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_cortex.o
+ .debug_str     0x00184517   0x168292 ./Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_dma.o
+ .debug_str     0x00184517   0x167b0f ./Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_gpio.o
+ .debug_str     0x00184517   0x168bb0 ./Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_i2c.o
+ .debug_str     0x00184517   0x167f54 ./Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_i2c_ex.o
+ .debug_str     0x00184517   0x167fd0 ./Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_pwr_ex.o
+ .debug_str     0x00184517   0x167ef3 ./Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_rcc.o
+ .debug_str     0x00184517   0x1683d4 ./Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_rcc_ex.o
+ .debug_str     0x00184517   0x167caa ./Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_rtc.o
+ .debug_str     0x00184517   0x168217 ./Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_spi.o
+ .debug_str     0x00184517   0x168c92 ./Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_tim.o
+ .debug_str     0x00184517   0x1685ba ./Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_tim_ex.o
+ .debug_str     0x00184517   0x168a34 ./Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_uart.o
+ .debug_str     0x00184517   0x167ff4 ./Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_uart_ex.o
+ .debug_str     0x00184517   0x16fa33 ./Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2/cmsis_os2.o
+ .debug_str     0x00184517     0xaccd ./Middlewares/Third_Party/FreeRTOS/Source/list.o
+ .debug_str     0x00184517     0xc80d ./Middlewares/Third_Party/FreeRTOS/Source/queue.o
+ .debug_str     0x00184517     0xd612 ./Middlewares/Third_Party/FreeRTOS/Source/tasks.o
+ .debug_str     0x00184517     0xd05e ./Middlewares/Third_Party/FreeRTOS/Source/timers.o
+ .debug_str     0x00184517     0xba0b ./Middlewares/Third_Party/FreeRTOS/Source/portable/GCC/ARM_CM4F/port.o
+ .debug_str     0x00184517     0xb60f ./Middlewares/Third_Party/FreeRTOS/Source/portable/MemMang/heap_4.o
+ .debug_str     0x00184517     0x6ce9 ./w5500/ioLibrary_Driver-master/Ethernet/W5500/w5500.o
+ .debug_str     0x00184517     0x7976 ./w5500/ioLibrary_Driver-master/Ethernet/socket.o
+ .debug_str     0x00184517     0x7702 ./w5500/ioLibrary_Driver-master/Ethernet/wizchip_conf.o
+ .debug_str     0x00184517     0x836e ./w5500/ioLibrary_Driver-master/Internet/MQTT/MQTTClient.o
+ .debug_str     0x00184517     0x74e8 ./w5500/ioLibrary_Driver-master/Internet/MQTT/mqtt_interface.o
+ .debug_str     0x00184517     0x74d7 ./w5500/ioLibrary_Driver-master/Internet/MQTT/MQTTPacket/src/MQTTConnectClient.o
+ .debug_str     0x00184517     0x7310 ./w5500/ioLibrary_Driver-master/Internet/MQTT/MQTTPacket/src/MQTTDeserializePublish.o
+ .debug_str     0x00184517     0x73d7 ./w5500/ioLibrary_Driver-master/Internet/MQTT/MQTTPacket/src/MQTTPacket.o
+ .debug_str     0x00184517     0x73b4 ./w5500/ioLibrary_Driver-master/Internet/MQTT/MQTTPacket/src/MQTTSerializePublish.o
+ .debug_str     0x00184517     0x73af ./w5500/ioLibrary_Driver-master/Internet/MQTT/MQTTPacket/src/MQTTSubscribeClient.o
+ .debug_str     0x00184517     0xab50 ./w5500/ioLibrary_Driver-master/Internet/SNTP/sntp.o
 
 .comment        0x00000000       0x43
  .comment       0x00000000       0x43 ./Core/Src/app.o

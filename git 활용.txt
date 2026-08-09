@@ -1,13 +1,41 @@
 0. git 기록 완전 삭제 명령어 	rmdir /s /q .git 
 
-1. 데이터 올리기 
+1. 데이터 최초 올리기 
+D:\2026.05.08\2025_project\2)smarttech\Project\Shelter\2026.05.25_final\MOS_version>
 git init
 git config --global --add safe.directory "D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final\MOS_version"
 git add .
 
-git commit -m "First upload: remove large installer"
+git commit -m "[0809]First upload: "
 git branch -M main
 git remote add origin https://github.com/sanghyunchoi-choi/Shelter.git
 git push -u origin main --force
 
-2. 
+2. 수정된 파일 올리기 
+D:\2026.05.08\2025_project\2)smarttech\Project\Shelter\2026.05.25_final\MOS_version>
+
+git status
+git add .
+git commit -m "[수정한 날짜] 어떤 부분을 수정했는지 간단히 적기"
+git push origin main
+
+==================================================================================
+상현 git URL --> https://github.com/sanghyunchoi-choi/Shelter
+
+1. 고정 IP를 사용하고 있었으나  DHCP로 변경 필요[기본 통신이 mqtt라 mqtt로 뭔가 구성이 필요할 것으로 보여진다.] 
+2. web서버에서 제어보드의 ip 변경이 가능한 섹션이 따로 구성을 해야 됨. 
+  접속된 제어보드 IP를 최초에 표시를 했다가,, 변경 ip를 제어보드로 전송을 하면 제어보드는 그 ip를 받아서 사용하면 된다. 
+
+  -> 브로커 ip도 변경이 필요할 수도 있다. 이 부분 고려해서 정리가 좀 필요하다. 이렇게 되면 최초에는 mqtt로 통신이 안될 것 같은데 
+    설정 부분은 http나 https로 해야 될 것 같기도 한데. 이 부분도 고려를 좀 해줘. 
+
+3. 입력 부분에 대한 제어 보드와 web서버 간에 연동이 되어야 된다. 
+  입력 포트는 pd7(4번) pd6(3번) pd5(2번) pd4(1번) 로 총 4개로 구성이 되어있다. 
+  입력이 들어 왔을 때 웹서버로 데이터를 전송하고 웹서버에서는 입력이 들어왔다는 count및 동그라미로 색상(입력 신호 초록, 없음 흰햇)을 표현할 수 있는 
+  부분이 필요 하다. 동그라미 아래에 신호가 들어왔다는 count 로 갯수를 볼 수 있는 섹션이 필요. 
+
+4. 웹서버에서는 추가 섹션이 2개가 더 추가가 되는 상황. 자동제어스케쥴하고 실시간 mqtt로그 사잉에 구성을 하면 좋을 것 같음. 
+
+5. 웹서버하고 제어보드 사이에 접속이 어느 순간 잘 안되는 부분이 잇는데 코드 좀 잘 분석해서 이 부분 코드 업데이트 필요 
+
+프로토콜 폴더의 문서도 업데이트 필요함.  프로토콜 문서 업데이트시 v1.0, v2.0 으로 구분해서 변경 필요 
