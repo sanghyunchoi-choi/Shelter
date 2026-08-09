@@ -238,18 +238,11 @@ void StartMQTTTask(void *argument)
 	/* NTP는 최초 1회 + 이후 24시간 간격으로만 동기화 */
 	static uint32_t last_ntp_sync_tick = 0;
 #define NTP_SYNC_INTERVAL_MS  (24UL * 60UL * 60UL * 1000UL)  // 24시간
-	uint32_t last_dhcp_tick = HAL_GetTick();
+
 
 	for (;;) {
 		is_mqtt_connected = false;
 		uint8_t ip[4];
-
-#if SHELTER_NET_USE_DHCP
-if (HAL_GetTick() - last_dhcp_tick >= 1000) {
-    last_dhcp_tick = HAL_GetTick();
-    W5500_DhcpTick();
-}
-#endif
 
 		/* [Step 1] 물리 소켓 완전 초기화 (Zombie Connection 방지) */
 		if (getSn_SR(MQTT_SOCKET_NUM) != SOCK_CLOSED) {
@@ -454,11 +447,14 @@ void StartAppTimeTask(void *argument)
 		MilliTimer = HAL_GetTick();
 		uint32_t now = HAL_GetTick();
 
+		// 1. 이미 여기서 정확하게 1초에 한 번만 진입하도록 차단막이 걸려 있습니다.
 		if (now - last_sec_tick >= 1000) {
 			last_sec_tick = now;
-#if SHELTER_NET_USE_DHCP
+
+			// 2. 중복 조건문 싹 지우고 가차 없이 바로 틱 실행!
+			#if SHELTER_NET_USE_DHCP
 			W5500_DhcpTick();
-#endif
+			#endif
 		}
 
 		osDelay(100);
