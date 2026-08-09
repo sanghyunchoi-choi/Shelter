@@ -25,7 +25,14 @@
 
 /* DHCP일 때만 사용 */
 #define SHELTER_DHCP_TIMEOUT_MS  30000U
-#define SHELTER_DHCP_SOCKET_NUM  0
+/* ★★★ 2026-08-09 핵심 버그 수정 ★★★
+ * 기존 값 0은 app.h의 MQTT_SOCKET_NUM(=0)과 완전히 동일한 소켓이었습니다.
+ * DHCP 리스 갱신 시점(약 30~40분 주기, 임대시간의 T1 지점)마다 DHCP
+ * 라이브러리가 소켓 0번을 UDP 모드로 재오픈하면서 그 소켓을 TCP로 쓰던
+ * MQTT 연결을 그대로 파괴하는 것이 "40분마다 접속 끊김" 현상의 진짜
+ * 원인이었습니다(로그의 "SR=0x22" = SOCK_UDP가 그 직접 증거).
+ * MQTT=0, SNTP=1, DNS=2 이므로 DHCP는 겹치지 않는 3번을 사용합니다. */
+#define SHELTER_DHCP_SOCKET_NUM  3
 
 /* =============================================================================
  * 2) MQTT 브로커 (제어보드가 접속하는 PC/서버)

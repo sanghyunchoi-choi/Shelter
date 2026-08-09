@@ -50,9 +50,14 @@ HAL_StatusTypeDef PowerBoard_UpdateAllData(PowerData *pwr_array) {
 
     // 1. 수신 모드 고정 및 쓰레기 FIFO 청소
     RS485_PWR_SetMode(GPIO_PIN_RESET);
-    while (__HAL_UART_GET_FLAG(&huart5, UART_FLAG_RXNE)) {
-        volatile uint32_t dummy = huart5.Instance->RDR;
-        (void)dummy;
+    {
+        /* ★ 2026-08-09: 극단적 노이즈 상황 대비 상한 추가 (정상 시 몇 바이트 내 종료) */
+        int guard = 0;
+        while (__HAL_UART_GET_FLAG(&huart5, UART_FLAG_RXNE) && guard < 64) {
+            volatile uint32_t dummy = huart5.Instance->RDR;
+            (void)dummy;
+            guard++;
+        }
     }
 
     // 2. STX(0x02) 검색 (1.2초 타임아웃)
@@ -119,7 +124,16 @@ HAL_StatusTypeDef PowerBoard_ControlAll(uint8_t board_id, uint8_t *states) {
     for(volatile int delay_gap = 0; delay_gap < 500; delay_gap++);
 
     HAL_StatusTypeDef status = HAL_UART_Transmit(&huart5, packet, 14, 100);
-    while(__HAL_UART_GET_FLAG(&huart5, UART_FLAG_TC) == RESET);
+    /* ★ 2026-08-09 수정: 타임아웃 없는 busy-wait → 태스크 영구 정지 위험. 상한(50ms) 추가. */
+    {
+        uint32_t tc_start = HAL_GetTick();
+        while (__HAL_UART_GET_FLAG(&huart5, UART_FLAG_TC) == RESET) {
+            if ((HAL_GetTick() - tc_start) > 50) {
+                printf("[PWR] TX TC flag timeout — RS485 line fault?\r\n");
+                break;
+            }
+        }
+    }
 
     for(volatile int delay_gap = 0; delay_gap < 500; delay_gap++);
     RS485_PWR_SetMode(GPIO_PIN_RESET);

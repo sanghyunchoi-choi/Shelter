@@ -40,6 +40,14 @@
 //
 //*****************************************************************************
 
+/* ★ 2026-08-09 빌드 오류 수정: main.h(STM32 HAL)를 wizchip_conf.h/socket.h보다
+ * 먼저 include 해야 합니다. w5500.h는 "IR" 등의 레지스터 이름을 전처리기
+ * 매크로로 정의하는데, STM32H7 HAL 헤더(stm32h743xx.h)에는 FDCAN/CCU
+ * 레지스터의 구조체 멤버 이름으로 똑같이 "IR"을 사용합니다. main.h를 나중에
+ * include하면 이미 정의된 매크로가 구조체 멤버 선언까지 치환해버려
+ * "expected identifier or '(' before numeric constant" 컴파일 에러가 납니다. */
+#include "main.h"
+#include "cmsis_os2.h"
 #include "mqtt_interface.h"
 #include "wizchip_conf.h"
 #include "socket.h"
@@ -186,25 +194,61 @@ int ConnectNetwork(Network* n, uint8_t* ip, uint16_t port) {
 }
 
 #else
+/* ============================================================================
+ * ★ 2026-08-09 재접속 안정화 패치 (보조 안전장치)
+ *
+ * 근본 원인은 DHCP/MQTT 소켓 번호 충돌(config.h, w5500_ctrl.c 참고)이었지만,
+ * 그와 별개로 ioLibrary의 connect()는 아래처럼 애플리케이션이 제어할 수 없는
+ * busy-wait이며 타임아웃도 osDelay()도 없습니다 (Ethernet/socket.c 참고):
+ *     while (getSn_SR(sn) != SOCK_ESTABLISHED) {
+ *         if (getSn_IR(sn) & Sn_IR_TIMEOUT) { ...; return SOCKERR_TIMEOUT; }
+ *         if (getSn_SR(sn) == SOCK_CLOSED)   { return SOCKERR_SOCKCLOSED; }
+ *     }
+ * 브로커가 응답하지 않는 등의 상황에서 이 내부 타임아웃을 100% 신뢰할 수
+ * 없으므로, 이중 안전장치로 애플리케이션 레벨에 확정적 타임아웃(4초)을
+ * 추가합니다. 타임아웃 시 소켓을 강제로 닫고 즉시 SOCK_ERROR를 반환해
+ * 상위 재시도 루프(app.c)로 제어권을 돌려주므로 더 이상 무한정 멈춰있을
+ * 수 없습니다. 매 폴링마다 osDelay(10)로 양보하여 다른 태스크(AC/AP RS485
+ * 폴링 등)가 굶는 것도 방지합니다.
+ * ============================================================================ */
+#define SHELTER_CONNECT_TIMEOUT_MS  4000U
+
 int ConnectNetwork(Network* n, uint8_t* ip, uint16_t port) {
     uint16_t myport = 12345;
+    uint8_t  sn = n->my_socket;
 
-    if (socket(n->my_socket, Sn_MR_TCP, myport, 0) != n->my_socket) {
+    if (socket(sn, Sn_MR_TCP, myport, 0) != sn) {
         return SOCK_ERROR;
     }
 
-#if 1
-    // 20231016 taylor//teddy 240122
-#if ((_WIZCHIP_ == 6100) || (_WIZCHIP_ == 6300))
-    if (connect(n->my_socket, ip, port, 4) != SOCK_OK)
-#else
-    if (connect(n->my_socket, ip, port) != SOCK_OK)
-#endif
-#else
-    if (connect(n->my_socket, ip, port) != SOCK_OK)
-#endif
-        return SOCK_ERROR;
+    setSn_DIPR(sn, ip);
+    setSn_DPORTR(sn, port);
+    setSn_CR(sn, Sn_CR_CONNECT);
+    while (getSn_CR(sn)) { /* 커맨드 레지스터 반영 대기 — 수십 us, 안전 */ }
 
-    return SOCK_OK;
+    uint32_t start_tick = HAL_GetTick();
+    for (;;) {
+        uint8_t sr = getSn_SR(sn);
+
+        if (sr == SOCK_ESTABLISHED) {
+            return SOCK_OK;
+        }
+        if (sr == SOCK_CLOSED) {
+            return SOCK_ERROR;
+        }
+        if (getSn_IR(sn) & Sn_IR_TIMEOUT) {
+            setSn_IR(sn, Sn_IR_TIMEOUT);
+            return SOCK_ERROR;
+        }
+        if ((HAL_GetTick() - start_tick) >= SHELTER_CONNECT_TIMEOUT_MS) {
+            setSn_CR(sn, Sn_CR_CLOSE);
+            while (getSn_CR(sn)) { }
+            printf("[NET] connect() forced-timeout after %lums (last SR=0x%02X)\r\n",
+                    (unsigned long)SHELTER_CONNECT_TIMEOUT_MS, sr);
+            return SOCK_ERROR;
+        }
+
+        osDelay(10); /* busy-wait 금지: 반드시 양보하여 다른 태스크 기아 방지 */
+    }
 }
 #endif

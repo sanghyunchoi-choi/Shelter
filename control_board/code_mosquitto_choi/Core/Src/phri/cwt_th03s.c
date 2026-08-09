@@ -91,7 +91,22 @@ HAL_StatusTypeDef CWTTH03S_Modbus_ReadSensor(THData *data) {
     }
 
     // 4. 물리적 전송 완료 확인
-    while(__HAL_UART_GET_FLAG(&huart1, UART_FLAG_TC) == RESET);
+    // ★ 2026-08-09 수정: 기존에는 타임아웃 없는 무한 busy-wait였음.
+    //   TC 플래그가 어떤 이유(RS485 라인 이상, 노이즈 등)로 세팅되지 않으면
+    //   이 태스크(주기 보고 담당)가 영구적으로 멈춰, "report가 어느 순간부터
+    //   전혀 안 됨" 증상의 유력한 원인 중 하나로 확인됨.
+    //   8바이트@4800bps ≈ 16.7ms이므로 50ms면 충분한 여유.
+    {
+        uint32_t tc_start = HAL_GetTick();
+        while (__HAL_UART_GET_FLAG(&huart1, UART_FLAG_TC) == RESET) {
+            if ((HAL_GetTick() - tc_start) > 50) {
+                RS485_SetMode(GPIO_PIN_RESET);
+                __HAL_UART_CLEAR_OREFLAG(&huart1);
+                printf("[CWT] TX TC flag timeout — RS485 line fault?\r\n");
+                return HAL_TIMEOUT;
+            }
+        }
+    }
 
     // 5. 수신 전환 전 미세 딜레이 (센서 응답 준비 시간)
     osDelay(2);

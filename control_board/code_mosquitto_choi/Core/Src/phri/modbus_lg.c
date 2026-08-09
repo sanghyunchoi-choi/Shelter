@@ -116,7 +116,15 @@ static void ModbusRawSend(uint8_t *data, uint16_t len)
     ModbusFlushRx();
     HAL_GPIO_WritePin(RTX_DIR4_GPIO_Port, RTX_DIR4_Pin, GPIO_PIN_SET);
     HAL_UART_Transmit(&huart4, data, len, 100);
-    while (__HAL_UART_GET_FLAG(&huart4, UART_FLAG_TC) == RESET) {
+    /* ★ 2026-08-09 수정: 타임아웃 없는 busy-wait → 태스크 영구 정지 위험. 상한(50ms) 추가. */
+    {
+        uint32_t tc_start = HAL_GetTick();
+        while (__HAL_UART_GET_FLAG(&huart4, UART_FLAG_TC) == RESET) {
+            if ((HAL_GetTick() - tc_start) > 50) {
+                printf("[LGAC] TX TC flag timeout — RS485 line fault?\r\n");
+                break;
+            }
+        }
     }
     HAL_GPIO_WritePin(RTX_DIR4_GPIO_Port, RTX_DIR4_Pin, GPIO_PIN_RESET);
     osDelay(SHELTER_RS485_TURNAROUND_MS);

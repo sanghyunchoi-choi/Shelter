@@ -1,6 +1,6 @@
 ../Core/Src/phri/power_board.c:11:13:RS485_PWR_SetMode	1
 ../Core/Src/phri/power_board.c:18:9:PowerBoard_CalculateBCC	2
 ../Core/Src/phri/power_board.c:29:6:PowerBoard_Init	2
-../Core/Src/phri/power_board.c:46:19:PowerBoard_UpdateAllData	10
-../Core/Src/phri/power_board.c:100:19:PowerBoard_ControlAll	5
-../Core/Src/phri/power_board.c:135:19:PowerBoard_ControlSingle	4
+../Core/Src/phri/power_board.c:46:19:PowerBoard_UpdateAllData	11
+../Core/Src/phri/power_board.c:105:19:PowerBoard_ControlAll	6
+../Core/Src/phri/power_board.c:149:19:PowerBoard_ControlSingle	4

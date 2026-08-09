@@ -219,7 +219,15 @@ int HimpelSendData(HIMPEL_ID da, HIMPEL_CMD cmd, const HimpelControlMessage* msg
     HimpelFlushRx();
     HAL_GPIO_WritePin(RTX_DIR3_GPIO_Port, RTX_DIR3_Pin, GPIO_PIN_SET);
     HAL_UART_Transmit(&huart3, sendBuf, HIMPEL_PACKET_SIZE, 100);
-    while (__HAL_UART_GET_FLAG(&huart3, UART_FLAG_TC) == RESET) {
+    /* ★ 2026-08-09 수정: 타임아웃 없는 busy-wait → 태스크 영구 정지 위험. 상한(50ms) 추가. */
+    {
+        uint32_t tc_start = HAL_GetTick();
+        while (__HAL_UART_GET_FLAG(&huart3, UART_FLAG_TC) == RESET) {
+            if ((HAL_GetTick() - tc_start) > 50) {
+                printf("[AC] TX TC flag timeout — RS485 line fault?\r\n");
+                break;
+            }
+        }
     }
     HAL_GPIO_WritePin(RTX_DIR3_GPIO_Port, RTX_DIR3_Pin, GPIO_PIN_RESET);
     osDelay(SHELTER_RS485_TURNAROUND_MS);

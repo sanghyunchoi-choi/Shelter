@@ -141,61 +141,47 @@ static bool W5500_ApplyDhcp(void)
 }
 /**
  * @brief FreeRTOS 1초 주기 태스크(StartAppTimeTask)에서 상시 호출되는 DHCP 핵심 엔진
+ *
+ * ★★★ [2026-08-09 근본 원인 확정 및 수정] ★★★
+ * "40분마다 MQTT 접속이 끊기고 이후 재접속이 안 되는" 문제의 진짜 원인은
+ * 이 함수의 로직이 아니라 **소켓 번호 충돌**이었습니다.
+ *
+ *   config.h:  #define SHELTER_DHCP_SOCKET_NUM  0
+ *   app.h   :  #define MQTT_SOCKET_NUM          0
+ *
+ * DHCP 클라이언트와 MQTT 클라이언트가 **똑같이 소켓 0번**을 사용하고
+ * 있었습니다. DHCP 리스(lease) 갱신 주기(보통 임대시간의 50% 지점, T1
+ * 타이머)가 되면 DHCP_run() 내부에서 socket(0, Sn_MR_UDP, ...)를 호출해
+ * 소켓 0번을 UDP 모드로 재오픈하는데, 이 순간 그 소켓을 TCP로 붙잡고
+ * 있던 MQTT 연결이 그대로 파괴됩니다. 실제 현장 로그에도
+ * "[DROP] TCP Socket Lost (SR=0x22)" 가 찍혔는데, 0x22는 SOCK_UDP
+ * 상태값입니다 — MQTT 소켓이 DHCP에 의해 UDP 모드로 뒤바뀐 것이 직접
+ * 증거입니다. 이전에 시도했던 "IP를 획득한 뒤 30분간 DHCP_run() 호출을
+ * 건너뛰는" 방식은 충돌 시점을 뒤로 늦출 뿐 근본 원인을 없애지 못했고
+ * (그래서 정확히 "40분 전후"에 여전히 문제가 재현됨), 오히려 진짜 갱신
+ * 타이밍을 놓쳐 리스가 만료될 위험까지 있었습니다.
+ *
+ * [최종 조치] config.h의 SHELTER_DHCP_SOCKET_NUM을 3번으로 분리했습니다
+ * (0=MQTT, 1=SNTP, 2=DNS, 3=DHCP 전용, 4~7 여유). 이제 소켓이 겹치지
+ * 않으므로 매초 DHCP_time_handler()/DHCP_run()을 그냥 정상적으로
+ * 호출해도 MQTT 소켓과 절대 충돌하지 않습니다. 따라서 임시 30분 가드
+ * 로직은 제거하고 WIZnet 권장 표준 패턴으로 복원했습니다.
  */
 void W5500_DhcpTick(void)
 {
-    // DHCP 기능이 기동되지 않았거나 랜 케이블이 분리된 상태라면 무조건 스킵
     if (!s_dhcp_started) return;
-    if ((getPHYCFGR() & 0x01) == 0) return;
+    if ((getPHYCFGR() & 0x01) == 0) return; // 케이블 분리 시 스킵
 
-    // 1. W5500 DHCP 라이브러리 내부 핵심 시계(초 카운터)는 1초마다 무조건 갱신되어야 합니다.
     DHCP_time_handler();
-
-    // 2. 외부 라이브러리 링크 에러를 차단하기 위한 우리 측 고유 1초 정적 누적 카운터
-    static uint32_t leased_seconds = 0;
-
-    // 3. W5500 내부 IP 레지스터를 실시간으로 직접 조회하여 현재 개통 상태를 체크
-    uint8_t current_ip[4];
-    getSIPR(current_ip);
-
-    // [교정 핵심] 유효한 사설 IP(192.168.x.x 등 0과 255가 아닌 진짜 IP)를 이미 들고 있는 상황에서만 가드를 켭니다!
-    if (current_ip[0] != 0 && current_ip[0] != 255) {
-
-        leased_seconds++; // 1초씩 누적 타이머 가동
-
-        /*
-         * [코어 가드 규칙]
-         * IP를 성공적으로 들고 있는 안정을 취한 상태라면, 최소 30분(1800초) 동안은
-         * 백그라운드 DHCP_run()의 불필요한 구동을 원천 차단하여 MQTT 소켓을 100% 보호합니다.
-         */
-        if (leased_seconds < 1800) {
-            return; // 30분 임계점 도달 전까지는 얌전하게 침묵 유지 (MQTT 간섭 0%)
-        }
-    } else {
-        // 부팅 직후이거나 IP가 0.0.0.0 혹은 유실된 상태라면 가드를 가동하지 않고
-        // 아래의 DHCP_run()으로 즉시 직결 통과시켜서 공유기한테 IP를 얻어오게 만듭니다.
-        leased_seconds = 0;
-    }
-
-    /*
-     * 4. 30분 마진이 초과했거나, 부팅 직후 최초 IP가 없는 단계일 때만 문이 열려 진입합니다.
-     *    공유기(DHCP 서버)단에 연장 신청(REQUEST) 또는 최초 할당(DISCOVER) 패킷을 송신합니다.
-     */
     uint8_t ret = DHCP_run();
 
-    // 공유기 수락으로 최초 할당 또는 연장 계약이 무사히 체결 완료된 시점
     if (ret == DHCP_IP_ASSIGN || ret == DHCP_IP_CHANGED) {
-        W5500_PrintNetwork("DHCP SUCCESS");
-
-        // IP 획득에 성공했으므로 카운터를 다시 0으로 비워 다음 30분간 MQTT 소켓을 완벽 차단 보호함
-        leased_seconds = 0;
+        W5500_PrintNetwork(ret == DHCP_IP_ASSIGN ? "DHCP ASSIGN" : "DHCP RENEW/CHANGED");
+    } else if (ret == DHCP_FAILED) {
+        printf("[W5500][DHCP] Lease 갱신 실패 — 재시도 대기\r\n");
     }
+    /* DHCP_IP_LEASED(정상 유지) 는 별도 처리 불필요 */
 }
-
-
-
-
-
 
 #endif /* SHELTER_NET_USE_DHCP */
 
