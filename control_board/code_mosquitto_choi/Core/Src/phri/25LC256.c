@@ -342,15 +342,27 @@ uint8_t EEPROM_SPI_WaitStandbyState(void) {
 	// Send "Read Status Register" instruction
 	EEPROM_SPI_SendInstruction((uint8_t*)command, 1);
 
-	// Loop as long as the memory is busy with a write cycle
+	/* ★ 2026-08-10 수정: 원래 타임아웃 없는 무한 루프였음.
+	   EEPROM이 배선되어 있지 않거나 응답하지 않으면(이 프로젝트에서
+	   최초로 실제 사용되는 경로라 아직 현장 검증 전) MISO가 플로팅되어
+	   WIP 비트가 항상 1로 읽혀 이 태스크가 영구적으로 멈출 수 있음.
+	   최대 200ms(EEPROM 쓰기는 보통 5ms 이내 완료)로 상한을 둠. */
+	uint32_t wait_start = HAL_GetTick();
 	do {
-
 		while (HAL_SPI_Receive(EEPROM_SPI, (uint8_t*)sEEstatus, 1, 200) == HAL_BUSY) {
 			HAL_Delay(1);
+			if ((HAL_GetTick() - wait_start) > 200) {
+				EEPROM_CS_HIGH();
+				return 1; /* 실패 — 호출부에서 EEPROM 없음/이상으로 처리 */
+			}
 		};
 
 		HAL_Delay(1);
 
+		if ((HAL_GetTick() - wait_start) > 200) {
+			EEPROM_CS_HIGH();
+			return 1;
+		}
 	} while ((sEEstatus[0] & EEPROM_WIP_FLAG) == SET); // Write in progress
 
 	// Deselect the EEPROM: Chip Select high

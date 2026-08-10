@@ -36,7 +36,7 @@ Core/Src/uart_test.o: ../Core/Src/uart_test.c ../Core/Inc/uart_test.h \
  ../Drivers/STM32H7xx_HAL_Driver/Inc/stm32h7xx_hal_uart.h \
  ../Drivers/STM32H7xx_HAL_Driver/Inc/stm32h7xx_hal_uart_ex.h \
  D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2/cmsis_os2.h \
- ../Core/Inc/app.h ../Core/Inc/config.h \
+ ../Core/Inc/app.h ../Core/Inc/config.h ../Core/Inc/net_config.h \
  D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/w5500/ioLibrary_Driver-master/Internet/MQTT/MQTTClient.h \
  D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/w5500/ioLibrary_Driver-master/Internet/MQTT/./MQTTPacket/src/MQTTPacket.h \
  D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/w5500/ioLibrary_Driver-master/Internet/MQTT/./MQTTPacket/src/MQTTConnect.h \
@@ -93,6 +93,7 @@ Core/Src/uart_test.o: ../Core/Src/uart_test.c ../Core/Inc/uart_test.h \
 D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2/cmsis_os2.h:
 ../Core/Inc/app.h:
 ../Core/Inc/config.h:
+../Core/Inc/net_config.h:
 D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/w5500/ioLibrary_Driver-master/Internet/MQTT/MQTTClient.h:
 D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/w5500/ioLibrary_Driver-master/Internet/MQTT/./MQTTPacket/src/MQTTPacket.h:
 D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/w5500/ioLibrary_Driver-master/Internet/MQTT/./MQTTPacket/src/MQTTConnect.h:

@@ -570,6 +570,15 @@ void MQTT_MessageArrived(MessageData* md) {
 
 				MQTTPublish(&c, topics.tele_ap, &(MQTTMessage){QOS0,0,0,0, p_buf, (int)strlen(p_buf)});
 
+				// 10. [v2.0] 외부 입력 4채널
+				snprintf(p_buf, 1536,
+						"{\"in\":[%d,%d,%d,%d],\"count\":[%lu,%lu,%lu,%lu],\"conn\":1}",
+						dev_status.in_stat.p4, dev_status.in_stat.p5,
+						dev_status.in_stat.p6, dev_status.in_stat.p7,
+						(unsigned long)dev_status.in_stat.cnt4, (unsigned long)dev_status.in_stat.cnt5,
+						(unsigned long)dev_status.in_stat.cnt6, (unsigned long)dev_status.in_stat.cnt7);
+				MQTTPublish(&c, topics.tele_input, &(MQTTMessage){QOS0,0,0,0, p_buf, (int)strlen(p_buf)});
+
 				// [동기화 핵심] 모든 주기적 보고 타이머를 현재로 갱신하여 즉각적인 중복 보고 방지
 				last_th_in_pub_tick  = now;
 				last_th_out_pub_tick = now;
@@ -578,17 +587,141 @@ void MQTT_MessageArrived(MessageData* md) {
 				last_fan_pub_tick    = now;
 				last_pwr_all_pub_tick = now; // PowerBoardTask의 주기를 뒤로 미룸
 				last_ap_pub_tick     = now;
+				last_input_pub_tick  = now;
 				pub_done_pwr_all     = true;
+				pub_done_input       = true;
 
 				osMutexRelease(mqtt_mutex_id);
 			}
 			free(p_buf);
 			return;
 		}
+
+		/* --- [CASE 3: STATIC IP 값 변경] v2.0 신규
+		   ★ 2026-08-10 설계: DHCP/STATIC "모드" 선택은 여전히 config.h의
+		   컴파일타임 매크로(SHELTER_NET_USE_STATIC/DHCP)로 결정됩니다.
+		   이 명령은 "지금 컴파일된 모드가 STATIC일 때 사용할 IP값"만
+		   EEPROM에 저장합니다 — 방금 안정화된 DHCP 콜백 로직은 건드리지
+		   않기 위한 의도적인 설계입니다. 보드가 DHCP로 빌드되어 있으면
+		   이 값은 저장은 되지만 재빌드 전까지 적용되지 않습니다(정상 동작).
+		   규격: {"set_net":{"ip":[192,168,0,50],"sn":[255,255,255,0],"gw":[192,168,0,1],"dns":[8,8,8,8]}}
+		   → EEPROM에 저장 후 500ms 뒤 재부팅하여 적용. 재부팅 후 MQTT 연결에
+		     성공하면 자동으로 "확정"되고, 실패가 누적되면 이전 설정으로
+		     자동 복구됩니다 (net_config.c 참고). */
+		else if (strstr(payload, "\"set_net\"") != NULL) {
+			NetRuntimeConfig new_cfg = g_net_cfg;   // 브로커 등 나머지 필드는 기존 값 유지
+			int ip[4] = {0}, sn[4] = {0}, gw[4] = {0}, dns[4] = {0};
+			bool ok = false;
+
+			if (strstr(payload, "\"ip\"") &&
+				sscanf(strstr(payload, "\"ip\""),
+						"\"ip\":[%d,%d,%d,%d]", &ip[0],&ip[1],&ip[2],&ip[3]) == 4 &&
+				strstr(payload, "\"sn\"") &&
+				sscanf(strstr(payload, "\"sn\""),
+						"\"sn\":[%d,%d,%d,%d]", &sn[0],&sn[1],&sn[2],&sn[3]) == 4 &&
+				strstr(payload, "\"gw\"") &&
+				sscanf(strstr(payload, "\"gw\""),
+						"\"gw\":[%d,%d,%d,%d]", &gw[0],&gw[1],&gw[2],&gw[3]) == 4) {
+				for (int i = 0; i < 4; i++) {
+					new_cfg.ip[i] = (uint8_t)ip[i];
+					new_cfg.sn[i] = (uint8_t)sn[i];
+					new_cfg.gw[i] = (uint8_t)gw[i];
+				}
+				/* dns는 선택 항목 — 없으면 기존 값 유지 */
+				if (strstr(payload, "\"dns\"") &&
+					sscanf(strstr(payload, "\"dns\""),
+							"\"dns\":[%d,%d,%d,%d]", &dns[0],&dns[1],&dns[2],&dns[3]) == 4) {
+					for (int i = 0; i < 4; i++) new_cfg.dns[i] = (uint8_t)dns[i];
+				}
+				ok = true;
+			}
+
+			if (ok) {
+				NetConfig_SaveAndApply(&new_cfg);
+				snprintf(p_buf, 1536, "{\"device\":\"SET_NET\",\"conn\":1,\"result\":1}");
+			} else {
+				snprintf(p_buf, 1536, "{\"device\":\"SET_NET\",\"conn\":1,\"result\":0}");
+			}
+			MQTTPublish(&c, topics.stat_dev, &(MQTTMessage){QOS0, 0, 0, 0, p_buf, (int)strlen(p_buf)});
+
+			if (ok) {
+				osDelay(500);
+				HAL_NVIC_SystemReset();
+			}
+			free(p_buf);
+			return;
+		}
+
+		/* --- [CASE 4: MQTT 브로커 IP/포트 변경] v2.0 신규
+		   규격: {"set_broker":{"ip":[192,168,0,177],"port":1883}} */
+		else if (strstr(payload, "\"set_broker\"") != NULL) {
+			NetRuntimeConfig new_cfg = g_net_cfg;
+			int ip[4] = {0}, port = 0;
+			bool ok = false;
+
+			if (strstr(payload, "\"ip\"") &&
+				sscanf(strstr(payload, "\"ip\""), "\"ip\":[%d,%d,%d,%d]",
+						&ip[0], &ip[1], &ip[2], &ip[3]) == 4) {
+				for (int i = 0; i < 4; i++) new_cfg.broker_ip[i] = (uint8_t)ip[i];
+				ok = true;
+			}
+			if (strstr(payload, "\"port\"") &&
+				sscanf(strstr(payload, "\"port\""), "\"port\":%d", &port) == 1 &&
+				port > 0 && port <= 65535) {
+				new_cfg.broker_port = (uint16_t)port;
+			}
+
+			if (ok) {
+				NetConfig_SaveAndApply(&new_cfg);
+				snprintf(p_buf, 1536, "{\"device\":\"SET_BROKER\",\"conn\":1,\"result\":1}");
+			} else {
+				snprintf(p_buf, 1536, "{\"device\":\"SET_BROKER\",\"conn\":1,\"result\":0}");
+			}
+			MQTTPublish(&c, topics.stat_dev, &(MQTTMessage){QOS0, 0, 0, 0, p_buf, (int)strlen(p_buf)});
+
+			if (ok) {
+				osDelay(500);
+				HAL_NVIC_SystemReset();
+			}
+			free(p_buf);
+			return;
+		}
+
 		// 명령어 불일치 시(Result: 0) 처리가 필요한 경우 여기에 else를 추가할 수 있습니다.
 		free(p_buf);
 		return;
 	}
 
+	/* ======================================================================
+	       6. [INPUT] 외부 입력 4채널 조회/카운트 초기화 (v2.0 신규)
+	       ====================================================================== */
+	else if (strstr(topic, topics.cmnd_input) != NULL) {
+		char resp[256];
+
+		if (strstr(payload, "\"get_input\"") != NULL) {
+			if (osMutexAcquire(mqtt_mutex_id, 200) == osOK) {
+				snprintf(resp, sizeof(resp),
+						"{\"in\":[%d,%d,%d,%d],\"count\":[%lu,%lu,%lu,%lu],\"conn\":1,\"result\":1}",
+						dev_status.in_stat.p4, dev_status.in_stat.p5,
+						dev_status.in_stat.p6, dev_status.in_stat.p7,
+						(unsigned long)dev_status.in_stat.cnt4, (unsigned long)dev_status.in_stat.cnt5,
+						(unsigned long)dev_status.in_stat.cnt6, (unsigned long)dev_status.in_stat.cnt7);
+				MQTTPublish(&c, topics.stat_input, &(MQTTMessage){QOS0,0,0,0,resp,(int)strlen(resp)});
+				osMutexRelease(mqtt_mutex_id);
+			}
+		} else if (strstr(payload, "\"reset_count\"") != NULL) {
+			if (osMutexAcquire(mqtt_mutex_id, 200) == osOK) {
+				dev_status.in_stat.cnt4 = dev_status.in_stat.cnt5 =
+						dev_status.in_stat.cnt6 = dev_status.in_stat.cnt7 = 0;
+				snprintf(resp, sizeof(resp),
+						"{\"in\":[%d,%d,%d,%d],\"count\":[0,0,0,0],\"conn\":1,\"result\":1}",
+						dev_status.in_stat.p4, dev_status.in_stat.p5,
+						dev_status.in_stat.p6, dev_status.in_stat.p7);
+				MQTTPublish(&c, topics.stat_input, &(MQTTMessage){QOS0,0,0,0,resp,(int)strlen(resp)});
+				osMutexRelease(mqtt_mutex_id);
+			}
+		}
+		return;
+	}
 
 }

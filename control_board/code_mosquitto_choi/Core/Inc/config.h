@@ -43,6 +43,16 @@
 #define SHELTER_MQTT_BROKER_PORT 1883
 
 /* =============================================================================
+ * 2-1) [v2.0 신규] STATIC IP / 브로커 설정 EEPROM 저장 + 자동 복구(Rollback)
+ *  ★ DHCP 콜백 로직(위 1번)은 절대 건드리지 않습니다. 여기서 EEPROM으로
+ *    런타임 변경되는 것은 "STATIC일 때 쓸 IP값"과 "브로커 IP/포트" 뿐입니다.
+ *    (위의 SHELTER_NET_IP 등은 EEPROM이 비어있을 때만 쓰이는 최초 기본값)
+ * ============================================================================= */
+#define SHELTER_NET_EEPROM_BASE_ADDR    0x0000
+#define SHELTER_NET_ROLLBACK_MAX_FAILS  3
+#define SHELTER_NET_ROLLBACK_TIMEOUT_MS 60000U
+
+/* =============================================================================
  * 기타
  * ============================================================================= */
 #define SHELTER_DEVICE_UID_LEN   25   /* 96-bit UID → 24 HEX + NUL */

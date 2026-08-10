@@ -1,5 +1,6 @@
 #include "w5500_ctrl.h"
 #include "config.h"
+#include "net_config.h"
 #include <stdio.h>
 #include <string.h>
 #include "cmsis_os2.h"
@@ -100,7 +101,16 @@ bool W5500_NetworkReady(uint8_t *ip_out4)
 static uint8_t s_dhcp_buf[1024];
 static bool s_dhcp_started = false;
 
-/* [정석 복구] IP 할당 완료 콜백 연산 안전화 */
+/* [정석 복구] IP 할당 완료 콜백 연산 안전화
+ * ★★★ 2026-08-10 추가 수정 ★★★
+ * 소켓 번호를 분리(0x22 UDP 충돌)했는데도 여전히 약 40분 주기로 TCP가
+ * 끊기는(SR=0x00) 현상이 재현되어 재점검한 결과, 이 콜백이 DHCP
+ * "리스 갱신(RENEW)" 때도 매번 wizchip_setnetinfo()를 호출해 SHAR/GAR/
+ * SUBR/SIPR — W5500의 "공통(칩 전체) 레지스터" — 를 다시 쓰고 있었습니다.
+ * 이 레지스터들은 모든 소켓이 공유하는데, IP가 실제로 바뀌지 않은
+ * 일반적인 리스 갱신에서도 매번 재작성하면 이미 ESTABLISHED 상태인
+ * MQTT TCP 소켓이 깨질 수 있습니다(소켓 번호 충돌 없이도).
+ * → 값이 실제로 바뀌었을 때만 재작성하도록 수정. */
 static void cb_dhcp_ip_assign(void) {
     wiz_NetInfo ni;
     getIPfromDHCP(ni.ip);
@@ -109,6 +119,18 @@ static void cb_dhcp_ip_assign(void) {
     getDNSfromDHCP(ni.dns);
     ni.dhcp = NETINFO_DHCP;
     W5500_BuildMacFromUid(ni.mac);
+
+    wiz_NetInfo cur;
+    wizchip_getnetinfo(&cur);
+    if (memcmp(cur.ip, ni.ip, 4) == 0 && memcmp(cur.gw, ni.gw, 4) == 0 &&
+        memcmp(cur.sn, ni.sn, 4) == 0 && memcmp(cur.mac, ni.mac, 6) == 0) {
+        printf("[W5500][DHCP] Lease renewed, IP unchanged (%d.%d.%d.%d) — register rewrite SKIPPED (MQTT 소켓 보호)\r\n",
+               ni.ip[0], ni.ip[1], ni.ip[2], ni.ip[3]);
+        return;
+    }
+
+    printf("[W5500][DHCP] Network info actually changed (%d.%d.%d.%d -> %d.%d.%d.%d) — applying\r\n",
+           cur.ip[0], cur.ip[1], cur.ip[2], cur.ip[3], ni.ip[0], ni.ip[1], ni.ip[2], ni.ip[3]);
     wizchip_setnetinfo(&ni);
 }
 
@@ -188,18 +210,16 @@ void W5500_DhcpTick(void)
 #if SHELTER_NET_USE_STATIC
 static bool W5500_ApplyStatic(void)
 {
-    const uint8_t ip[4]  = SHELTER_NET_IP;
-    const uint8_t sn[4] = SHELTER_NET_SUBNET;
-    const uint8_t gw[4] = SHELTER_NET_GATEWAY;
-    const uint8_t dns[4]= SHELTER_NET_DNS;
-
+    /* ★ 2026-08-10: config.h 하드코딩 매크로 대신 EEPROM(net_config.c)에서
+       로드된 g_net_cfg를 사용 — 웹서버에서 IP 변경 가능해짐.
+       g_net_cfg는 main()이 W5500_Init() 이전에 NetConfig_Load()로 채워둠. */
     wiz_NetInfo ni;
     memset(&ni, 0, sizeof(ni));
     W5500_BuildMacFromUid(ni.mac);
-    memcpy(ni.ip, ip, 4);
-    memcpy(ni.sn, sn, 4);
-    memcpy(ni.gw, gw, 4);
-    memcpy(ni.dns, dns, 4);
+    memcpy(ni.ip, g_net_cfg.ip, 4);
+    memcpy(ni.sn, g_net_cfg.sn, 4);
+    memcpy(ni.gw, g_net_cfg.gw, 4);
+    memcpy(ni.dns, g_net_cfg.dns, 4);
     ni.dhcp = NETINFO_STATIC;
     wizchip_setnetinfo(&ni);
     W5500_PrintNetwork("STATIC OK");

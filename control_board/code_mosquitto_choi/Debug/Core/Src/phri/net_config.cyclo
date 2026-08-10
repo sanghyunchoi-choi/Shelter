@@ -1,0 +1,10 @@
+../Core/Src/phri/net_config.c:27:17:calc_checksum	2
+../Core/Src/phri/net_config.c:35:13:load_defaults	1
+../Core/Src/phri/net_config.c:52:13:eeprom_read	1
+../Core/Src/phri/net_config.c:58:13:eeprom_write	1
+../Core/Src/phri/net_config.c:64:13:write_current	1
+../Core/Src/phri/net_config.c:71:13:read_current	4
+../Core/Src/phri/net_config.c:84:6:NetConfig_CheckRollback	6
+../Core/Src/phri/net_config.c:117:6:NetConfig_Load	5
+../Core/Src/phri/net_config.c:156:6:NetConfig_SaveAndApply	2
+../Core/Src/phri/net_config.c:173:6:NetConfig_ConfirmBoot	3

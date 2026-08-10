@@ -3,6 +3,7 @@
 
 #include "main.h"
 #include "config.h"
+#include "net_config.h"
 #include "cmsis_os2.h"
 #include "MQTTClient.h"
 //#include "updm010ub.h"  // 먼지 센서
@@ -34,7 +35,8 @@
 
 // 입력 상태 (외부 입력 & 8단 스위치)
 typedef struct {
-    bool p4, p5, p6, p7;
+    bool p4, p5, p6, p7;                    // 현재 입력 상태 (1=신호 있음)
+    uint32_t cnt4, cnt5, cnt6, cnt7;         // 입력 신호 누적 카운트 (상승엣지 기준)
     uint8_t sw_val;
 } InputStatus;
 
@@ -164,35 +166,17 @@ typedef struct {
     char cmnd_ac_temp[TOPIC_SIZE], cmnd_ac_spd[TOPIC_SIZE];
     char cmnd_ac_setall[TOPIC_SIZE], cmnd_ac_getall[TOPIC_SIZE];
     char stat_ac[TOPIC_SIZE];
+    // 7. 외부 입력 4채널 (Input, v2.0 신규)
+    char tele_input[TOPIC_SIZE];
+    char cmnd_input[TOPIC_SIZE];
+    char stat_input[TOPIC_SIZE];
 } MQTT_Topics;
 
 
-#if 0
-// EEPROM 저장용 통합 설정 구조체 (Config)
-typedef struct {
-    uint32_t magic;             // 0x55AA1234 (데이터 유효성 검증용)
-
-    /* 1. 네트워크 및 식별 정보 (Config.txt 역할) */
-    char     ip_addr[16];       // 고정 IP (예: "192.168.1.100")
-    uint16_t port;              // MQTT 포트 (예: 1883)
-    char     uuid[32];          // 보드 고유 ID (부팅 후 저장 가능)
-
-    /* 2. 에어컨(AC) 설정 정보 */
-    int      ac_temp_last;      // 마지막 설정 온도
-    uint8_t  ac_mode_last;      // 마지막 모드 (0:COOL, 1:DRY 등)
-    int      ac_speed_last;     // 마지막 풍량
-
-    /* 3. 공기청정기(AP) 설정 정보 */
-    uint8_t  ap_mode_last;      // 0:Auto, 1:Manual
-    int      ap_speed_last;     // 팬 속도
-    bool     ap_uv_on;          // UV 살균등 상태
-
-    /* 4. 시스템 보호 및 검증 */
-    uint16_t checksum;          // 데이터 무결성 체크 (전체 바이트 합산)
-} ShelterConfig;
-
-extern ShelterConfig sys_cfg;   // 전역 설정 변수
-#endif
+/* [구 계획, 2026-08-10에 실제 구현됨]
+   네트워크/브로커 EEPROM 저장 구조체는 net_config.h의 NetRuntimeConfig +
+   net_config.c(25LC256 EEPROM I/O, rollback 포함)로 구현되었습니다.
+   (AC/AP 마지막 설정값 저장은 이번 범위에 포함되지 않았습니다.) */
 typedef struct { GPIO_TypeDef* port; uint16_t pin; } RelayPinMap;
 
 /* ======================================================================
@@ -212,12 +196,14 @@ extern volatile bool    pub_done_pwr_all;       // 통합 전원 보고용 추�
 extern volatile bool    pub_done_ap, pub_done_ac, pub_done_fan;
 extern volatile bool    pub_done_relay, pub_done_dust;
 extern volatile bool    pub_done_th_in, pub_done_th_out;
+extern volatile bool    pub_done_input;    // 외부 입력 4채널 보고 완료 여부 (v2.0)
 
 // C. 보고 주기 관리용 타이머 (하트비트 리셋용)
 extern uint32_t         last_pwr_all_pub_tick;
 extern uint32_t         last_ap_pub_tick, last_ac_pub_tick, last_fan_pub_tick;
 extern uint32_t         last_dust_pub_tick, last_state_pub_tick; // 통합 상태용 추가
 extern uint32_t         last_th_in_pub_tick, last_th_out_pub_tick;
+extern uint32_t         last_input_pub_tick;   // 외부 입력 4채널 보고 타이머 (v2.0)
 
 // D. 상태 백업 변수 (중복 보고 및 Changed 판정 방지용)
 extern PowerData        last_sent_pwr[MAX_POWER_CHANNELS];

@@ -18,6 +18,7 @@
 "./Core/Src/phri/hcsd.o"
 "./Core/Src/phri/himpel.o"
 "./Core/Src/phri/modbus_lg.o"
+"./Core/Src/phri/net_config.o"
 "./Core/Src/phri/power_board.o"
 "./Core/Src/phri/updm010ub.o"
 "./Core/Startup/startup_stm32h743zitx.o"

@@ -6,5 +6,5 @@
 ../Core/Src/phri/25LC256.c:268:6:sEE_WriteEnable	1
 ../Core/Src/phri/25LC256.c:286:6:sEE_WriteDisable	1
 ../Core/Src/phri/25LC256.c:305:6:sEE_WriteStatusRegister	1
-../Core/Src/phri/25LC256.c:335:9:EEPROM_SPI_WaitStandbyState	3
-../Core/Src/phri/25LC256.c:368:6:EEPROM_SPI_SendInstruction	3
+../Core/Src/phri/25LC256.c:335:9:EEPROM_SPI_WaitStandbyState	5
+../Core/Src/phri/25LC256.c:380:6:EEPROM_SPI_SendInstruction	3

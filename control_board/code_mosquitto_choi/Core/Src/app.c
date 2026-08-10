@@ -1,6 +1,7 @@
 #include "app.h"
 #include "app_loop.h"
 #include "config.h"
+#include "net_config.h"
 #include <w5500_ctrl.h>
 #include <ds3231m.h>
 #include "sntp.h"
@@ -87,6 +88,7 @@ volatile bool  pub_done_relay = false;
 volatile bool  pub_done_dust  = false;
 volatile bool  pub_done_th_in = false;
 volatile bool  pub_done_th_out= false;
+volatile bool  pub_done_input = false;   // 외부 입력 4채널 (v2.0)
 
 uint32_t       last_state_pub_tick = 0;
 uint32_t       last_ap_pub_tick    = 0;
@@ -95,6 +97,7 @@ uint32_t       last_fan_pub_tick   = 0;
 uint32_t       last_dust_pub_tick  = 0;
 uint32_t       last_th_in_pub_tick = 0;
 uint32_t       last_th_out_pub_tick= 0;
+uint32_t       last_input_pub_tick = 0;  // 외부 입력 4채널 (v2.0)
 
 /* ======================================================================
  [4. 데이터 백업 변수 (mqtt_handler 동기화용)]
@@ -218,6 +221,10 @@ void StartMQTTTask(void *argument)
 	snprintf(topics.cmnd_ac_setall,TOPIC_SIZE, "dev/cmnd/ac/set_all");
 	snprintf(topics.cmnd_ac_getall,TOPIC_SIZE, "dev/cmnd/ac/get");
 	snprintf(topics.stat_ac,       TOPIC_SIZE, "dev/stat/ac");
+	/* [외부 입력 4채널] v2.0 신규 */
+	snprintf(topics.tele_input, TOPIC_SIZE, "dev/tele/input");
+	snprintf(topics.cmnd_input, TOPIC_SIZE, "dev/cmnd/input");
+	snprintf(topics.stat_input, TOPIC_SIZE, "dev/stat/input");
 
 	/* --- 3. Mutex 생성 --- */
 	const osMutexAttr_t mqtt_mutex_attr = { .name="mqtt_mutex", .attr_bits=osMutexRecursive };
@@ -239,10 +246,23 @@ void StartMQTTTask(void *argument)
 	static uint32_t last_ntp_sync_tick = 0;
 #define NTP_SYNC_INTERVAL_MS  (24UL * 60UL * 60UL * 1000UL)  // 24시간
 
+	/* ★ 2026-08-10: 네트워크/브로커 설정이 "미확정(pending)" 상태로 부팅
+	   되었는데 일정 시간(SHELTER_NET_ROLLBACK_TIMEOUT_MS) 안에 MQTT 연결에
+	   성공하지 못하면 재부팅하여 NetConfig_CheckRollback()의 실패 카운터가
+	   누적되게 합니다. N회 반복되면 자동으로 이전(정상) 설정으로 복구됩니다. */
+	uint32_t boot_tick = HAL_GetTick();
 
 	for (;;) {
 		is_mqtt_connected = false;
 		uint8_t ip[4];
+
+		if (g_net_cfg_pending &&
+			(HAL_GetTick() - boot_tick > SHELTER_NET_ROLLBACK_TIMEOUT_MS)) {
+			printf("[NETCFG] New config still unconfirmed after %lus. Rebooting for rollback check...\r\n",
+					(unsigned long)(SHELTER_NET_ROLLBACK_TIMEOUT_MS / 1000));
+			osDelay(300);
+			HAL_NVIC_SystemReset();
+		}
 
 		/* [Step 1] 물리 소켓 완전 초기화 (Zombie Connection 방지) */
 		if (getSn_SR(MQTT_SOCKET_NUM) != SOCK_CLOSED) {
@@ -312,13 +332,24 @@ void StartMQTTTask(void *argument)
 			}
 		}
 
-		/* [Step 4] TCP 레이어 연결 */
+		/* [Step 4] TCP 레이어 연결
+		   ★ 2026-08-10: 브로커 IP/포트를 config.h 고정 매크로 대신
+		   EEPROM(g_net_cfg)에서 읽음 — 웹서버에서 브로커 IP 변경 가능. */
+#if 1
 		uint8_t broker_ip[] = SHELTER_MQTT_BROKER_IP;
+		uint16_t broker_port = SHELTER_MQTT_BROKER_PORT;
+#else
+		uint8_t broker_ip[4];
+		memcpy(broker_ip, g_net_cfg.broker_ip, 4);
+		uint16_t broker_port = g_net_cfg.broker_port;
+
 		printf("[MQTT] Connecting to %u.%u.%u.%u:%d...\r\n",
 				broker_ip[0], broker_ip[1], broker_ip[2], broker_ip[3],
-				SHELTER_MQTT_BROKER_PORT);
+				broker_port);
+#endif
+
 		NewNetwork(&n, MQTT_SOCKET_NUM);
-		if (ConnectNetwork(&n, broker_ip, SHELTER_MQTT_BROKER_PORT) != SOCK_OK) {
+		if (ConnectNetwork(&n, broker_ip, broker_port) != SOCK_OK) {
 		    if (disconnect_tick == 0) disconnect_tick = HAL_GetTick();
 
 		    // 강제로 플래그를 끄고 하단의 소켓 폐쇄(Cleanup) 코드로 이동하게 만듦
@@ -344,6 +375,10 @@ void StartMQTTTask(void *argument)
 			is_mqtt_connected = true;
 			MQTT_Reset_Report_Flags();
 
+			/* ★ 2026-08-10: 방금 바꾼 네트워크/브로커 설정이 "미확정" 상태였다면
+			   여기서 확정(commit) — MQTT 연결 성공이 곧 새 설정이 정상 동작함을 의미. */
+			NetConfig_ConfirmBoot();
+
 			if (disconnect_tick != 0) {
 				printf("[MQTT] Restored! (Down: %lu sec)\r\n",
 						(HAL_GetTick() - disconnect_tick) / 1000);
@@ -352,10 +387,22 @@ void StartMQTTTask(void *argument)
 				printf("[MQTT] Connected Successfully.\r\n");
 			}
 
-			/* ONLINE (프로토콜: uid = STM32 96-bit UID, 장치 식별용) */
-			snprintf(payload, sizeof(payload),
-					"{\"status\":\"ONLINE\",\"uid\":\"%s\",\"conn\":1}",
-					dev_status.uid);
+			/* ONLINE (프로토콜: uid = STM32 96-bit UID, 장치 식별용)
+			   ★ 2026-08-10: ip/mode 필드 추가 — 웹서버 네트워크 설정
+			   화면에 "현재 접속 IP"를 표시하기 위함 (기존 uid 필드는 유지). */
+			{
+				uint8_t cur_ip[4] = {0};
+				W5500_NetworkReady(cur_ip);
+				snprintf(payload, sizeof(payload),
+						"{\"status\":\"ONLINE\",\"uid\":\"%s\",\"ip\":\"%d.%d.%d.%d\",\"mode\":\"%s\",\"conn\":1}",
+						dev_status.uid, cur_ip[0], cur_ip[1], cur_ip[2], cur_ip[3],
+#if SHELTER_NET_USE_DHCP
+						"DHCP"
+#else
+						"STATIC"
+#endif
+						);
+			}
 			MQTTMessage pub_msg = {
 					.qos = QOS0, .retained = 1, .dup = 0,
 					.payload = payload, .payloadlen = (int)strlen(payload)
@@ -388,8 +435,14 @@ void StartMQTTTask(void *argument)
 				/* TCP 소켓 상태 체크 */
 				if (getSn_SR(MQTT_SOCKET_NUM) != 0x17) {
 					if (++sr_fail > 20) {
-						printf("[DROP] TCP Socket Lost (SR=0x%02X). Disconnecting.\r\n",
-								getSn_SR(MQTT_SOCKET_NUM));
+						/* ★ 2026-08-10 진단 강화: 다음에 또 재현될 경우 원인을
+						   확정할 수 있도록 Sn_IR 값을 함께 출력합니다.
+						   비트: bit0=CON, bit1=DISCON(상대가 정상 종료),
+						         bit3=TIMEOUT(재전송 실패=통신 단절/응답없음) */
+						uint8_t ir = getSn_IR(MQTT_SOCKET_NUM);
+						printf("[DROP] TCP Socket Lost (SR=0x%02X, Sn_IR=0x%02X [DISCON=%d TIMEOUT=%d]). Disconnecting.\r\n",
+								getSn_SR(MQTT_SOCKET_NUM), ir,
+								(ir & 0x02) ? 1 : 0, (ir & 0x08) ? 1 : 0);
 						break;
 					}
 				} else {
@@ -490,6 +543,7 @@ void StartAppSensorTask(void *argument)
 	DUST_Init(&huart8);
 	CWTTH03S_Modbus_Init();
 	pub_done_dust = pub_done_th_in = pub_done_th_out = pub_done_relay = false;
+	pub_done_input = false;   // v2.0: 외부 입력 4채널 최초 보고 트리거
 
 	/* [2. MQTT 연결 대기] */
 	while (!is_mqtt_connected) osDelay(500);
@@ -545,10 +599,23 @@ void StartAppSensorTask(void *argument)
 		MQTTPublish(&c, topics.tele_ad,
 				&(MQTTMessage){QOS0,0,0,0,payload,(int)strlen(payload)});
 
+		/* v2.0: 외부 입력 4채널 최초 상태 발행 */
+		SCAN_External_Inputs();
+		snprintf(payload, sizeof(payload),
+				"{\"in\":[%d,%d,%d,%d],\"count\":[%lu,%lu,%lu,%lu],\"conn\":1}",
+				dev_status.in_stat.p4, dev_status.in_stat.p5,
+				dev_status.in_stat.p6, dev_status.in_stat.p7,
+				(unsigned long)dev_status.in_stat.cnt4, (unsigned long)dev_status.in_stat.cnt5,
+				(unsigned long)dev_status.in_stat.cnt6, (unsigned long)dev_status.in_stat.cnt7);
+		MQTTPublish(&c, topics.tele_input,
+				&(MQTTMessage){QOS0,0,0,0,payload,(int)strlen(payload)});
+		pub_done_input = true;
+
 		/* 보고 시점 기준점을 전송 완료 직후 HAL_GetTick()으로 고정 */
 		uint32_t sent_tick = HAL_GetTick();
 		last_dust_pub_tick = last_th_in_pub_tick =
 				last_th_out_pub_tick = last_state_pub_tick = sent_tick;
+		last_input_pub_tick = sent_tick;
 		pub_done_dust = pub_done_th_in = pub_done_th_out = pub_done_relay = true;
 		osMutexRelease(mqtt_mutex_id);
 	}
@@ -562,6 +629,28 @@ void StartAppSensorTask(void *argument)
 		while (DUST_GetReadyData(&dev_status.dust)) {
 			dev_status.dust.is_connected = true;
 			last_dust_recv_tick = now;
+		}
+
+		/* --- A-1. [v2.0] 외부 입력 4채널 스캔 + 변경 시 즉시 보고 ---
+		   SCAN_External_Inputs()는 원래 존재했지만 어디서도 호출되지 않던
+		   죽은 코드였습니다(입력이 절대 갱신되지 않는 버그). 이 루프
+		   (~200ms 주기)에서 호출하여 실제로 동작하게 하고,
+		   상태가 바뀌면 10분을 기다리지 않고 즉시 dev/tele/input 을 발행합니다. */
+		SCAN_External_Inputs();
+		if (!pub_done_input) {
+			if (osMutexAcquire(mqtt_mutex_id, 200) == osOK) {
+				snprintf(payload, sizeof(payload),
+						"{\"in\":[%d,%d,%d,%d],\"count\":[%lu,%lu,%lu,%lu],\"conn\":1}",
+						dev_status.in_stat.p4, dev_status.in_stat.p5,
+						dev_status.in_stat.p6, dev_status.in_stat.p7,
+						(unsigned long)dev_status.in_stat.cnt4, (unsigned long)dev_status.in_stat.cnt5,
+						(unsigned long)dev_status.in_stat.cnt6, (unsigned long)dev_status.in_stat.cnt7);
+				MQTTPublish(&c, topics.tele_input,
+						&(MQTTMessage){QOS0,0,0,0,payload,(int)strlen(payload)});
+				pub_done_input = true;
+				last_input_pub_tick = HAL_GetTick();
+				osMutexRelease(mqtt_mutex_id);
+			}
 		}
 
 		if (now - last_in_recv_tick >= 3000) {
@@ -632,10 +721,21 @@ void StartAppSensorTask(void *argument)
 						  MQTTPublish(&c, topics.tele_ad,
 								  &(MQTTMessage){QOS0,0,0,0,payload,(int)strlen(payload)});
 
+						  /* [v2.0] 외부 입력 4채널 — 변경 없어도 10분마다 재확인 발행 */
+						  snprintf(payload, sizeof(payload),
+								  "{\"in\":[%d,%d,%d,%d],\"count\":[%lu,%lu,%lu,%lu],\"conn\":1}",
+								  dev_status.in_stat.p4, dev_status.in_stat.p5,
+								  dev_status.in_stat.p6, dev_status.in_stat.p7,
+								  (unsigned long)dev_status.in_stat.cnt4, (unsigned long)dev_status.in_stat.cnt5,
+								  (unsigned long)dev_status.in_stat.cnt6, (unsigned long)dev_status.in_stat.cnt7);
+						  MQTTPublish(&c, topics.tele_input,
+								  &(MQTTMessage){QOS0,0,0,0,payload,(int)strlen(payload)});
+
 						  /* 타이머를 전송 완료 시점으로 갱신 (드리프트 방지) */
 						  uint32_t sent_tick = HAL_GetTick();
 						  last_th_out_pub_tick = last_th_in_pub_tick =
 								  last_dust_pub_tick   = last_state_pub_tick = sent_tick;
+						  last_input_pub_tick = sent_tick;
 
 						  osMutexRelease(mqtt_mutex_id);
 						  printf("[SENSOR] Periodic Report Sent.\r\n");
@@ -1167,6 +1267,13 @@ void MX_App_Init(void)
 {
 	DS3231_Init(&hi2c3);
 	Boot_Sync_Internal_RTC_From_DS3231();
+
+	/* ★ 2026-08-10: EEPROM에서 STATIC IP/브로커 설정 로드 (+ 이전 설정
+	   실패 시 자동 복구). DHCP 모드일 때도 브로커 IP/포트는 여기서 로드됨.
+	   EEPROM이 없거나 응답하지 않아도 안전하게 config.h 기본값으로 대체됨. */
+	//NetConfig_CheckRollback();
+	//NetConfig_Load();
+
 	W5500_Init();
 	if (!W5500_ApplyNetwork()) {
 		printf("[ERR] W5500 network apply failed (config.h)\r\n");

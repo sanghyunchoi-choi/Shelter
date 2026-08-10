@@ -171,7 +171,20 @@ void SCAN_External_Inputs(void) {
 	bool cp6 = (HAL_GPIO_ReadPin(GPIOD, GPIO_PIN_6) == GPIO_PIN_SET);
 	bool cp7 = (HAL_GPIO_ReadPin(GPIOD, GPIO_PIN_7) == GPIO_PIN_SET);
 
-	// 전역 구조체 업데이트 (MQTT Task에서 10분마다 이 값을 참조함)
+	// [v2.0] 상승엣지(0→1, 신호 없음→있음) 발생 시 채널별 누적 카운트 증가.
+	// 웹서버 화면의 "동그라미 아래 count" 숫자가 여기서 올라간 값입니다.
+	if (cp4 && !dev_status.in_stat.p4) dev_status.in_stat.cnt4++;
+	if (cp5 && !dev_status.in_stat.p5) dev_status.in_stat.cnt5++;
+	if (cp6 && !dev_status.in_stat.p6) dev_status.in_stat.cnt6++;
+	if (cp7 && !dev_status.in_stat.p7) dev_status.in_stat.cnt7++;
+
+	// 상태가 바뀌면(신호 발생 또는 해제) 즉시 MQTT 보고 트리거 (10분 대기하지 않음)
+	if (cp4 != dev_status.in_stat.p4 || cp5 != dev_status.in_stat.p5 ||
+	    cp6 != dev_status.in_stat.p6 || cp7 != dev_status.in_stat.p7) {
+		pub_done_input = false;
+	}
+
+	// 전역 구조체 업데이트 (MQTT Task에서 참조함)
 	dev_status.in_stat.p4 = cp4;
 	dev_status.in_stat.p5 = cp5;
 	dev_status.in_stat.p6 = cp6;
@@ -179,7 +192,10 @@ void SCAN_External_Inputs(void) {
 
 	// 로그는 변화가 있을 때만 출력하여 터미널 과부하 방지
 	if (cp4 != last_p4 || cp5 != last_p5 || cp6 != last_p6 || cp7 != last_p7) {
-		printf("[INPUT] PD4-7 State Updated\r\n");
+		printf("[INPUT] PD4-7 State Updated: %d %d %d %d (cnt %lu %lu %lu %lu)\r\n",
+				cp4, cp5, cp6, cp7,
+				(unsigned long)dev_status.in_stat.cnt4, (unsigned long)dev_status.in_stat.cnt5,
+				(unsigned long)dev_status.in_stat.cnt6, (unsigned long)dev_status.in_stat.cnt7);
 		last_p4 = cp4; last_p5 = cp5; last_p6 = cp6; last_p7 = cp7;
 	}
 }
