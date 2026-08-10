@@ -227,13 +227,56 @@ static bool W5500_ApplyStatic(void)
 }
 #endif
 
+/**
+ * @brief EEPROM 런타임 설정 데이터에 따라 DHCP 또는 STATIC 네트워크를 동적으로 적용합니다.
+ */
+bool W5500_ApplyStatic(void)
+{
+    wiz_NetInfo ni;
+
+    // 안전장치: 구조체 초기화 및 MAC 주소 바인딩
+    memset(&ni, 0, sizeof(ni));
+    W5500_BuildMacFromUid(ni.mac);
+
+    // ★ [핵심] config.h 매크로 대신 EEPROM 런타임 변수(g_net_cfg)의 주소 데이터를 다이렉트 매핑
+    memcpy(ni.ip,  g_net_cfg.ip,  4);
+    memcpy(ni.sn,  g_net_cfg.sn,  4);
+    memcpy(ni.gw,  g_net_cfg.gw,  4);
+    memcpy(ni.dns, g_net_cfg.dns, 4);
+    ni.dhcp = NETINFO_STATIC;
+
+    // W5500 하드웨어 레지스터 칩에 정적 IP 영구 적용
+    wizchip_setnetinfo(&ni);
+
+    // 기존 보드 고유의 정적 적용 완료 로깅 함수 호출
+    W5500_PrintNetwork("STATIC OK");
+
+    // 반영된 정보 정밀 로깅 추가
+    printf("[W5500] Run-time Static IP Fixed -> %u.%u.%u.%u\r\n",
+           ni.ip[0], ni.ip[1], ni.ip[2], ni.ip[3]);
+
+    return true;
+}
 bool W5500_ApplyNetwork(void)
 {
-#if SHELTER_NET_USE_DHCP
-    return W5500_ApplyDhcp();
-#else
-    return W5500_ApplyStatic();
-#endif
+    // 예외 처리 안전장치: 최초 공장 출하 상태이거나 데이터 깨짐으로 인해
+    // mode 값이 0 또는 1이 아닐 경우, 통신 다운을 방지하기 위해 보수적 DHCP 모드로 강제 구동합니다.
+    if (g_net_cfg.net_mode != 0 && g_net_cfg.net_mode != 1) {
+        printf("[W5500] Warning: Invalid 런타임 net_mode (%d). Falling back to DHCP Default.\r\n", g_net_cfg.net_mode);
+        return W5500_ApplyDhcp();
+    }
+
+    // 런타임 동적 스위칭 조건 분기
+    if (g_net_cfg.net_mode == 0) {
+        /* [서버의 원격 명령 지정 STATIC IP 모드] */
+        printf("[W5500] Switching to 런타임 STATIC Mode via Server Command\r\n");
+        return W5500_ApplyStatic();
+    }
+    else {
+        /* [최초 공장 부팅 및 일반 DHCP 모드] */
+        printf("[W5500] Switching to 런타임 DHCP Mode via Default Status\r\n");
+        return W5500_ApplyDhcp();
+    }
 }
 
 void W5500_Interrupt_Config(void) {

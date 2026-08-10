@@ -29,14 +29,17 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+/* net_config.h 구조체 수정본 */
 typedef struct {
+    uint8_t  net_mode;     // 0 = STATIC, 1 = DHCP
     uint8_t  ip[4];
     uint8_t  sn[4];
     uint8_t  gw[4];
     uint8_t  dns[4];
     uint8_t  broker_ip[4];
     uint16_t broker_port;
-} NetRuntimeConfig;
+} __attribute__((packed)) NetRuntimeConfig; // ★ [필수] 1바이트 단위 패킹 지정을 통해 패딩 오염 원천 차단
+
 
 extern NetRuntimeConfig g_net_cfg;
 

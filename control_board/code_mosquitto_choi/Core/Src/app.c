@@ -36,7 +36,7 @@
 #define FAN_TEMP_RANGE  (FAN_TEMP_MAX - FAN_TEMP_MIN)
 
 extern void getAPStatusAll(APData* dest);
-
+extern bool W5500_ApplyNetwork(void);
 /* ======================================================================
  [1. 통합 장치 상태 관리 (Global Status Snapshot)]
  ====================================================================== */
@@ -335,17 +335,26 @@ void StartMQTTTask(void *argument)
 		/* [Step 4] TCP 레이어 연결
 		   ★ 2026-08-10: 브로커 IP/포트를 config.h 고정 매크로 대신
 		   EEPROM(g_net_cfg)에서 읽음 — 웹서버에서 브로커 IP 변경 가능. */
-#if 1
+#if 0
 		uint8_t broker_ip[] = SHELTER_MQTT_BROKER_IP;
 		uint16_t broker_port = SHELTER_MQTT_BROKER_PORT;
 #else
-		uint8_t broker_ip[4];
-		memcpy(broker_ip, g_net_cfg.broker_ip, 4);
-		uint16_t broker_port = g_net_cfg.broker_port;
+        // 런타임 변수 참조 모드 (#else 환경)
+        uint8_t broker_ip[4];
+        broker_ip[0] = g_net_cfg.broker_ip[0];
+        broker_ip[1] = g_net_cfg.broker_ip[1];
+        broker_ip[2] = g_net_cfg.broker_ip[2];
+        broker_ip[3] = g_net_cfg.broker_ip[3];
 
-		printf("[MQTT] Connecting to %u.%u.%u.%u:%d...\r\n",
-				broker_ip[0], broker_ip[1], broker_ip[2], broker_ip[3],
-				broker_port);
+        uint16_t broker_port = g_net_cfg.broker_port;
+
+        // 주소값이 아닌 실제 데이터가 찍히도록 포맷팅 보장
+        printf("[MQTT] Connecting to 런타임 변수 -> %u.%u.%u.%u:%u...\r\n",
+                (unsigned int)broker_ip[0],
+                (unsigned int)broker_ip[1],
+                (unsigned int)broker_ip[2],
+                (unsigned int)broker_ip[3],
+                (unsigned int)broker_port);
 #endif
 
 		NewNetwork(&n, MQTT_SOCKET_NUM);
@@ -1271,8 +1280,8 @@ void MX_App_Init(void)
 	/* ★ 2026-08-10: EEPROM에서 STATIC IP/브로커 설정 로드 (+ 이전 설정
 	   실패 시 자동 복구). DHCP 모드일 때도 브로커 IP/포트는 여기서 로드됨.
 	   EEPROM이 없거나 응답하지 않아도 안전하게 config.h 기본값으로 대체됨. */
-	//NetConfig_CheckRollback();
-	//NetConfig_Load();
+	NetConfig_CheckRollback();
+	NetConfig_Load();
 
 	W5500_Init();
 	if (!W5500_ApplyNetwork()) {

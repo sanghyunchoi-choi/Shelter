@@ -1,6 +1,11 @@
 # Shelter Protocol (MOS / Mosquitto)
 
-> **규격 개정:** rev **2.0** (tele/state `uid`, 펌웨어 `config.h`)  
+> **버전 이력**
+> | 버전 | 날짜 | 내용 |
+> |------|------|------|
+> | v1.0 | ~2026-08-08 | `tele/state`에 `uid` 도입 (구 `ip` 필드 대체). 아래 문서 원문(섹션 1~12, 부록 A/B)이 v1.0 기준입니다. |
+> | **v2.0** | **2026-08-10** | **① 외부 입력 4채널(PD4~7) 신규 지원 ② STATIC IP값/MQTT 브로커 IP·포트 EEPROM 저장 + 웹 설정 화면 ③ DHCP↔MQTT 소켓 충돌·RS485 무한대기 등 재접속 안정성 수정 ④ `tele/state`에 `ip`/`mode` 필드 추가.** 변경 내역은 본 문서 맨 아래 "v2.0 변경 사항"에 정리. |
+>
 > **서버 전달용 엑셀:** `Shelter_Protocol.xlsx` — `python Protocol/_build_shelter_protocol_xlsx.py` 로 재생성  
 > **대상 버전:** `MOS_version` (일반 Mosquitto, TLS 미적용)  
 > **참고:** `쉘터_MQTT_프로토콜_규격서.xlsx`는 QMEX TLS 버전용 — 본 문서에서는 제외
@@ -53,7 +58,13 @@ Smart Shelter 제어보드(Control Board)가 MQTT 브로커와 JSON 페이로드
 
 MQTT 브로커: `SHELTER_MQTT_BROKER_IP` `{a,b,c,d}`, `SHELTER_MQTT_BROKER_PORT`.
 
-LAN 주소는 MQTT `tele/state`에 넣지 않습니다. 시리얼 로그 `[NET] Link up. LAN x.x.x.x`로만 확인합니다.
+LAN 주소는 시리얼 로그 `[NET] Link up. LAN x.x.x.x`로 확인 가능하며,
+**v2.0부터는 `dev/tele/state`의 `ip` 필드로도 확인 가능**합니다 (섹션 2.1).
+
+> **v2.0:** 위 표의 값들은 EEPROM이 비어있는 "최초 출하" 시에만 쓰이는 기본값입니다.
+> STATIC IP값과 브로커 IP/포트는 웹서버 "네트워크 설정" 화면 또는 MQTT 명령으로
+> 런타임 변경 후 EEPROM에 저장됩니다 (섹션 2B). **DHCP/STATIC 모드 자체는 여전히
+> 이 표처럼 재빌드가 필요합니다.**
 
 ---
 
@@ -65,11 +76,13 @@ LAN 주소는 MQTT `tele/state`에 넣지 않습니다. 시리얼 로그 `[NET] 
 
 | 상태 | Payload |
 |------|---------|
-| ONLINE | `{"status":"ONLINE","uid":"A1B2C3D4E5F6....","conn":1}` |
+| ONLINE (v1.0) | `{"status":"ONLINE","uid":"A1B2C3D4E5F6....","conn":1}` |
+| ONLINE (**v2.0**) | `{"status":"ONLINE","uid":"A1B2C3D4E5F6....","ip":"192.168.0.115","mode":"DHCP","conn":1}` |
 | OFFLINE (LWT) | `{"status":"OFFLINE"}` |
 
 - MQTT 연결 시 LWT 설정, retained=1
 - 비정상 종료 시 브로커가 OFFLINE 자동 발행
+- **v2.0 추가:** `ip`(현재 실제 IP), `mode`(`"DHCP"`/`"STATIC"`, 펌웨어 컴파일 값) — 웹서버 "네트워크 설정" 화면에서 표시
 
 ### 2.2 먼지센서 — `dev/tele/dust`
 
@@ -94,7 +107,97 @@ LAN 주소는 MQTT `tele/state`에 넣지 않습니다. 시리얼 로그 `[NET] 
 
 ---
 
-## 3. 자동문 릴레이 (AD, 15채널)
+## 2A. [v2.0 신규] 외부 입력 4채널 — `dev/tele/input` / `dev/cmnd/input` / `dev/stat/input`
+
+STM32 GPIOD PD4~PD7 4개 디지털 입력. `SCAN_External_Inputs()`가 매 센서 태스크 루프
+(~200ms)마다 스캔하며, **상태 변경 시 10분을 기다리지 않고 즉시 1회 발행**합니다
+(다른 센서와 동일한 R3 규칙). 채널별로 상승엣지(신호 없음→있음) 횟수를 누적 카운트합니다.
+
+| 구분 | 토픽 |
+|------|------|
+| tele | `dev/tele/input` |
+| stat | `dev/stat/input` |
+| cmnd | `dev/cmnd/input` |
+
+### 2A.1 Telemetry — `dev/tele/input`
+
+```json
+{"in":[1,0,0,1],"count":[12,0,0,3],"conn":1}
+```
+
+| 필드 | 설명 |
+|------|------|
+| `in[0..3]` | PD4, PD5, PD6, PD7 현재 상태 (0=신호 없음, 1=신호 있음) |
+| `count[0..3]` | 각 채널의 누적 상승엣지 카운트 (부팅 이후, 재부팅 시 0으로 초기화) |
+
+- 웹서버 UI: 4개 원(●) — 흰색=신호없음, 초록색=신호있음, 원 아래에 count 숫자 표시
+
+### 2A.2 Command — `dev/cmnd/input`
+
+| 명령 | Payload | 설명 |
+|------|---------|------|
+| 상태 조회 | `{"get_input":"state"}` | 현재 4채널 상태+카운트 즉시 응답 |
+| 카운트 초기화 | `{"reset_count":1}` | 4채널 카운트를 0으로 리셋 (입력 상태 자체는 유지) |
+
+### 2A.3 Stat 응답 — `dev/stat/input`
+
+```json
+{"in":[1,0,0,1],"count":[12,0,0,3],"conn":1,"result":1}
+```
+
+---
+
+## 2B. [v2.0 신규] 네트워크/브로커 설정 — `dev/cmnd/dev`의 `set_net` / `set_broker`
+
+**설계 원칙:** DHCP/STATIC "모드" 선택은 여전히 `config.h`의 컴파일타임 매크로
+(`SHELTER_NET_USE_STATIC`/`SHELTER_NET_USE_DHCP`)로만 결정됩니다. 이 명령들로
+런타임 변경되는 것은 다음 두 가지뿐입니다 (25LC256 EEPROM에 저장, `net_config.c`):
+
+1. **STATIC 모드일 때 사용할 IP/서브넷/게이트웨이/DNS 값**
+   (보드가 지금 DHCP로 빌드되어 있으면 저장은 되지만 STATIC으로 재빌드하기 전까지 미적용)
+2. **MQTT 브로커 IP/포트** (DHCP/STATIC 어느 모드든 즉시 적용됨)
+
+### 2B.1 STATIC IP값 변경
+
+**Command** (`dev/cmnd/dev`)
+```json
+{"set_net":{"ip":[192,168,0,50],"sn":[255,255,255,0],"gw":[192,168,0,1],"dns":[8,8,8,8]}}
+```
+- `dns`는 선택 항목 (없으면 기존 값 유지)
+
+**Stat 응답** (`dev/stat/dev`)
+```json
+{"device":"SET_NET","conn":1,"result":1}
+```
+→ 성공 시 500ms 후 재부팅하여 적용 시도
+
+### 2B.2 브로커 IP/포트 변경
+
+**Command**
+```json
+{"set_broker":{"ip":[192,168,0,177],"port":1883}}
+```
+- `port`는 선택 항목 (없으면 기존 포트 유지)
+
+**Stat 응답**
+```json
+{"device":"SET_BROKER","conn":1,"result":1}
+```
+→ 성공 시 500ms 후 재부팅하여 적용 시도
+
+### 2B.3 안전장치 (자동 롤백)
+
+새 설정 적용 후 60초(`SHELTER_NET_ROLLBACK_TIMEOUT_MS`) 안에 MQTT 연결에 성공하지
+못하면 재부팅하며, 이런 미확정 재부팅이 3회(`SHELTER_NET_ROLLBACK_MAX_FAILS`) 누적되면
+**자동으로 바로 이전(정상 동작 확인된) 설정으로 복구**합니다. 잘못된 IP를 입력해도
+현장에서 보드가 완전히 응답 불가 상태로 남지 않도록 하기 위함입니다.
+
+> ⚠️ EEPROM(25LC256) 경로는 이번에 처음 실제로 사용됩니다. 현장 배포 전 최소 1회는
+> "설정 변경 → 재부팅 → 값이 실제로 반영되는지"를 직접 확인해 주세요. EEPROM이 없거나
+> 응답하지 않으면 `NetConfig_Load()`가 자동으로 `config.h` 컴파일타임 값으로 대체되어
+> 보드가 멈추지 않고 안전하게 부팅됩니다.
+
+---
 
 | 구분 | 토픽 |
 |------|------|
@@ -364,9 +467,10 @@ MQTT로 노출되는 PB 데이터는 Control Board가 집계·변환합니다.
 
 > 서버 최초 연결·갱신 시 사용. 발행 후 10분 타이머 리셋.
 
-### 8.3 (미구현) 브로커 IP 설정
+### 8.3 [v2.0] 네트워크/브로커 설정
 
-엑셀에 `{"b_ip":"192.168.0.100"}` 항목이 있으나 **현재 MOS 코드 미구현**. 향후 검토.
+**v1.0에서는 미구현**이었으나(`{"b_ip":"192.168.0.100"}` 엑셀 항목), **v2.0에서 구현**되었습니다.
+`dev/cmnd/dev`의 `set_net` / `set_broker` 명령을 사용합니다 — 상세 규격은 **섹션 2B** 참고.
 
 ---
 
@@ -418,7 +522,8 @@ MQTT로 노출되는 PB 데이터는 Control Board가 집계·변환합니다.
 | DEV reset | `{"reset":"DEV_RESET"}` | ✅ 일치 | |
 | DEV ALL_DATA | `{"data":"ALL_DATA"}` | ⚠️ PB tele JSON | `mqtt_handler.c` L507~517 **JSON 구조 오류** |
 | ONLINE payload | `conn:1` 포함 | ⚠️ `conn` 없음 | `app.c` L379 — 선택적 |
-| 브로커 IP 변경 | `b_ip` | ❌ 미구현 | 엑셀 참고 항목 |
+| 브로커 IP 변경 | `set_broker` (v2.0) | ✅ 구현 완료 | 섹션 2B |
+| 외부 입력 4채널 | `dev/tele/input` (v2.0) | ✅ 구현 완료 (기존엔 죽은 코드) | 섹션 2A |
 | 구 테스트 명령 | `dev/{MAC}/cmnd/…` | ❌ 불일치 | `프로토콜 명령어 모음.txt` 구버전 |
 
 ### 11.1 레거시 명령 (구버전 — 사용 금지)
@@ -472,6 +577,36 @@ mosquitto_pub -h 192.168.0.100 -t "dev/cmnd/dev" \
 | `{"b_id",1,get_pb","state"}` | `{"b_id":1,"get_pb":"state"}` |
 | `{"get_ad","state"}` | `{"get_ad":"state"}` |
 | `{"set_fan",{"mode":…}}` | `{"set_fan":{"mode":…}}` |
+
+---
+
+## 부록 C — v2.0 변경 사항 상세 (2026-08-10)
+
+### C.1 기능 추가
+| 항목 | 내용 |
+|------|------|
+| 외부 입력 4채널 | PD4~PD7 스캔 로직이 **어디서도 호출되지 않던 죽은 코드**였음(입력이 절대 갱신 안 됨) → 센서 태스크에 연결, 상승엣지 카운트 + 변경 시 즉시 발행 추가. 섹션 2A |
+| STATIC IP / 브로커 EEPROM 저장 | `net_config.c` 신규 (25LC256 EEPROM), 웹서버 "네트워크 설정" 화면에서 변경. 섹션 2B |
+| `tele/state`에 `ip`/`mode` 필드 | 현재 실제 접속 IP·모드를 웹 UI에 노출하기 위함 |
+| 자동 롤백 | 네트워크/브로커 설정 오입력 시 자동으로 이전 정상값 복구 (섹션 2B.3) |
+
+### C.2 안정성 수정 (재접속 문제)
+현장에서 "약 40분마다 MQTT 접속이 끊기고 이후 재접속이 안 됨" 현상이 보고되어 원인을
+추적한 결과, 아래 3가지 문제가 확인되어 수정되었습니다.
+
+| # | 원인 | 증거 | 조치 |
+|---|------|------|------|
+| 1 | `MQTT_SOCKET_NUM`(0)과 `SHELTER_DHCP_SOCKET_NUM`(0)이 **동일한 소켓 번호**. DHCP 리스 갱신(T1 타이머, ~30~40분 주기) 시 라이브러리가 소켓 0을 UDP로 재오픈 → MQTT TCP 소켓 파괴 | 로그의 `SR=0x22`(=SOCK_UDP) | `SHELTER_DHCP_SOCKET_NUM`을 3번으로 분리 (0=MQTT, 1=SNTP, 2=DNS, 3=DHCP) |
+| 2 | 소켓 분리 후에도 재현 — DHCP 리스 **갱신**(IP 불변) 때마다 `wizchip_setnetinfo()`를 호출해 W5500 **칩 공통 레지스터**(SHAR/GAR/SUBR/SIPR)를 매번 재작성 → 이미 ESTABLISHED인 MQTT 소켓에 부작용 | `SR=0x00`(SOCK_CLOSED)으로 재현 패턴 변화 | `cb_dhcp_ip_assign()`에서 IP/GW/SN/MAC이 실제로 바뀌었을 때만 재작성하도록 수정 |
+| 3 | RS485 통신 4곳(`cwt_th03s.c`, `himpel.c`, `modbus_lg.c`, `power_board.c`)에 **타임아웃 없는 UART TC-flag busy-wait** — 라인 이상 시 센서 태스크가 영구 정지 → 그 이후 모든 report 중단 | "재접속 후 report가 전혀 안 됨" | 4곳 모두 50ms 타임아웃 추가 |
+
+추가로 `mqtt_interface.c`의 `connect()`에 4초 강제 타임아웃(+ `osDelay` yield)을 보조
+안전장치로 추가했고, `25LC256.c`(EEPROM 드라이버, v2.0에서 최초로 실사용)의
+`EEPROM_SPI_WaitStandbyState()`에도 동일한 이유로 200ms 타임아웃을 추가했습니다.
+드롭 감지 시 로그에 `Sn_IR`(DISCON/TIMEOUT 비트) 값도 함께 출력하도록 진단을 강화했습니다.
+
+> 위 표의 #1, #2는 **현장 로그로 근거가 확인된 원인**입니다. 다만 40분 주기 드롭이
+> 100% 재현 불가한 상황이었던 만큼, 패치 이후에도 계속 모니터링이 필요합니다.
 
 ---
 
