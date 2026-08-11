@@ -50,6 +50,11 @@
 //
 //*****************************************************************************
 
+/* ★ 2026-08-11 추가: main.h를 socket.h/dhcp.h보다 먼저 include.
+ * (w5500.h가 "IR" 등을 매크로로 정의하므로, STM32 HAL 헤더는 반드시
+ *  그 전에 include해야 함 — mqtt_interface.c에서 겪었던 것과 동일한 이유) */
+#include "main.h"
+#include "cmsis_os2.h"
 #include "socket.h"
 #include "dhcp.h"
 
@@ -1018,8 +1023,21 @@ int8_t check_DHCP_leasedIP(void) {
         // Received ARP reply or etc : IP address conflict occur, DHCP Failed
         send_DHCP_DECLINE();
 
-        ret = dhcp_tick_1s;
-        while ((dhcp_tick_1s - ret) < 2) ;  // wait for 1s over; wait to complete to send DECLINE message;
+        /* ★ 2026-08-11 수정: 기존에는 dhcp_tick_1s(이 함수를 호출한 바로
+         * 그 태스크 루프에서만 증가하는 카운터)가 2틱 증가하길 기다리는
+         * 구조였는데, DHCP_time_handler()가 DHCP_run()과 같은 태스크에서
+         * "순서대로" 호출되는 이 프로젝트의 호출 방식에서는 이 while문에
+         * 갇힌 동안 그 카운터가 절대 증가할 수 없어 영원히 못 빠져나오는
+         * 데드락이었습니다(IP 충돌이 감지되는 드문 경우에만 발생하지만,
+         * 한 번 걸리면 보드가 통째로 멈추는 것과 같은 효과). HAL_GetTick()
+         * 기준으로 2초만 기다리도록 교체 — DECLINE 메시지 전송 완료를
+         * 기다리려는 원래 의도(약 1~2초)는 그대로 유지됩니다. */
+        {
+            uint32_t decline_wait_start = HAL_GetTick();
+            while ((HAL_GetTick() - decline_wait_start) < 2000) {
+                osDelay(10);
+            }
+        }
 
         return 0;
     }

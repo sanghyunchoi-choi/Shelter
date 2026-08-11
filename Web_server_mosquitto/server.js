@@ -13,10 +13,13 @@ const TOPICS = {
  TELE_TH_IN: 'dev/tele/th_in', TELE_TH_OUT: 'dev/tele/th_out', 
  TELE_AD: 'dev/tele/ad', TELE_FAN: 'dev/tele/fan', 
  TELE_PB: 'dev/tele/pb', TELE_AP: 'dev/tele/ap', TELE_AC: 'dev/tele/ac', 
+ TELE_INPUT: 'dev/tele/input',
  CMD_AD: 'dev/cmnd/ad', CMD_FAN: 'dev/cmnd/fan', CMD_PB: 'dev/cmnd/pb', 
  CMD_AP: 'dev/cmnd/ap', CMD_AC: 'dev/cmnd/ac', CMD_DEV: 'dev/cmnd/dev',
+ CMD_INPUT: 'dev/cmnd/input',
  STAT_AC: 'dev/stat/ac', STAT_AP: 'dev/stat/ap', STAT_FAN: 'dev/stat/fan',
- STAT_PB: 'dev/stat/pb', STAT_AD: 'dev/stat/ad', STAT_DEV: 'dev/stat/dev'
+ STAT_PB: 'dev/stat/pb', STAT_AD: 'dev/stat/ad', STAT_DEV: 'dev/stat/dev',
+ STAT_INPUT: 'dev/stat/input'
 }; 
 
 const app = express(); 
@@ -37,6 +40,10 @@ app.post('/api/login', (req, res) => {
 }); 
 
 let hourlyPowerStats = Array(24).fill(0); 
+// [v2.0 신규] 실시간 개별 채널 전력 그래프용 롤링 히스토리
+// PB tele(10초 주기)가 올 때마다 1개씩 추가, 최대 360개(1시간) 유지
+const POWER_HISTORY_MAX = 360;
+let powerHistory = [];
 let mqttLogSession = []; 
 let globalScheduleConfig = { 
  morningHour: 7, morningMin: 0, 
@@ -47,7 +54,7 @@ let globalScheduleConfig = {
 
 // 뼈대 마스터 상태 메모리
 const deviceState = { 
- state: { status: 'OFFLINE', uid: '', conn: 0 }, 
+ state: { status: 'OFFLINE', uid: '', ip: '', mode: '', conn: 0 }, 
  dust: { pm1_0: 0, pm2_5: 0, pm10: 0, conn: 0 }, 
  th_in: { temp: 0, humi: 0, conn: 0 }, 
  th_out: { temp: 0, humi: 0, conn: 0 }, 
@@ -55,7 +62,9 @@ const deviceState = {
  fan: { mode: 'AUTO', duty: 0, conn: 0 }, 
  pb: { current_b_id: 1, channels: Array(8).fill(0).map((_,i)=>({b_id:1, ch:i+1, sw:0, w:0, c:0.0, v:220})), conn: 0 }, 
  ap: { pwr: 0, mode: 'AUTO', spd: 0, uv: 0, co2: 0, pm25: 0, pm10: 0, pm1_0: 0, temp: 0, temp_out: 0, humi: 0, tvoc: 0, filter: 100, conn: 0 }, 
- ac: { pwr: 0, mode: 'COOL', temp: 24, curr: 0, spd: 1, err: 0, conn: 0 }
+ ac: { pwr: 0, mode: 'COOL', temp: 24, curr: 0, spd: 1, err: 0, conn: 0 },
+ // [v2.0 신규] 외부 입력 4채널 (PD4~PD7)
+ input: { p4: 0, p5: 0, p6: 0, p7: 0, cnt4: 0, cnt5: 0, cnt6: 0, cnt7: 0, conn: 0 }
 }; 
 
 let deviceTimeoutTimer = null; 
@@ -81,17 +90,19 @@ const TELE_KEY_MAP = {
  'dev/stat/pb': 'pb', 
  [TOPICS.TELE_STATE]: 'state', [TOPICS.TELE_DUST]: 'dust', [TOPICS.TELE_TH_IN]: 'th_in', 
  [TOPICS.TELE_TH_OUT]: 'th_out', [TOPICS.TELE_AD]: 'ad', [TOPICS.TELE_FAN]: 'fan', 
- [TOPICS.TELE_PB]: 'pb', [TOPICS.TELE_AP]: 'ap', [TOPICS.TELE_AC]: 'ac'
+ [TOPICS.TELE_PB]: 'pb', [TOPICS.TELE_AP]: 'ap', [TOPICS.TELE_AC]: 'ac',
+ [TOPICS.TELE_INPUT]: 'input'
 };
 
 const STAT_KEY_MAP = {
- [TOPICS.STAT_AC]: 'ac', [TOPICS.STAT_AP]: 'ap', [TOPICS.STAT_FAN]: 'fan'
+ [TOPICS.STAT_AC]: 'ac', [TOPICS.STAT_AP]: 'ap', [TOPICS.STAT_FAN]: 'fan',
+ [TOPICS.STAT_INPUT]: 'input'
 };
 
 const TELE_TOPIC_BY_KEY = {
  state: TOPICS.TELE_STATE, dust: TOPICS.TELE_DUST, th_in: TOPICS.TELE_TH_IN,
  th_out: TOPICS.TELE_TH_OUT, ad: TOPICS.TELE_AD, fan: TOPICS.TELE_FAN,
- pb: TOPICS.TELE_PB, ap: TOPICS.TELE_AP, ac: TOPICS.TELE_AC
+ pb: TOPICS.TELE_PB, ap: TOPICS.TELE_AP, ac: TOPICS.TELE_AC, input: TOPICS.TELE_INPUT
 }; 
 
 const mqttOptions = { 
@@ -107,10 +118,26 @@ mqttClient.on('connect', () => {
  const allSubTopics = [
  ...Object.keys(TELE_KEY_MAP),
  ...Object.keys(STAT_KEY_MAP),
- 'dev/cmnd/ad', 'dev/cmnd/fan', 'dev/cmnd/pb', 'dev/cmnd/ap', 'dev/cmnd/ac', 'dev/cmnd/dev'
+ 'dev/cmnd/ad', 'dev/cmnd/fan', 'dev/cmnd/pb', 'dev/cmnd/ap', 'dev/cmnd/ac', 'dev/cmnd/dev',
+ TOPICS.STAT_DEV
  ];
  mqttClient.subscribe(allSubTopics);
 }); 
+
+// [v2.0 신규] 펌웨어의 {"in":[p4,p5,p6,p7],"count":[c4,c5,c6,c7],"conn":1} 형식을
+// 웹 UI가 다루기 쉬운 평평한(flat) 구조로 변환
+function normalizeInputPayload(payload) {
+ if (payload && Array.isArray(payload.in) && Array.isArray(payload.count)) {
+ return {
+ p4: payload.in[0] ? 1 : 0, p5: payload.in[1] ? 1 : 0,
+ p6: payload.in[2] ? 1 : 0, p7: payload.in[3] ? 1 : 0,
+ cnt4: payload.count[0] || 0, cnt5: payload.count[1] || 0,
+ cnt6: payload.count[2] || 0, cnt7: payload.count[3] || 0,
+ conn: payload.conn !== undefined ? payload.conn : 1
+ };
+ }
+ return payload;
+}
 
 // ⚡ 센서 데이터 원본 인입 즉시 UI 전체 매핑 바이패스 락 해제
 mqttClient.on('message', (topic, message) => {
@@ -126,8 +153,9 @@ mqttClient.on('message', (topic, message) => {
 
  const statKey = STAT_KEY_MAP[topic];
  if (statKey && statKey !== 'dev') {
+ const normalized = statKey === 'input' ? normalizeInputPayload(payload) : payload;
  if (payload.result === 1) {
- Object.assign(deviceState[statKey], payload);
+ Object.assign(deviceState[statKey], normalized);
  deviceState[statKey].conn = payload.conn !== undefined ? payload.conn : 1;
  } else {
  deviceState[statKey].conn = payload.conn !== undefined ? payload.conn : 0;
@@ -158,10 +186,26 @@ mqttClient.on('message', (topic, message) => {
  deviceState.pb.conn = 1;
  const hour = new Date().getHours();
  hourlyPowerStats[hour] += (totalPowerSum / 60);
+
+ // [v2.0 신규] 실시간 개별 채널 전력 그래프용 샘플 적립
+ // PB tele는 10초 주기로 오는 "순간값(instant)"이라 시간별 누적(Wh)과는
+ // 별개로, 최근 값들을 그대로 롤링 버퍼에 쌓아서 라인 그래프로 보여줍니다.
+ const sample = {
+ t: Date.now(),
+ ch: deviceState.pb.channels.map(c => c.w || 0),
+ total: totalPowerSum
+ };
+ powerHistory.push(sample);
+ if (powerHistory.length > POWER_HISTORY_MAX) powerHistory.shift();
+ io.emit('power_sample', sample);
  } else if (payload && payload.result === 0) {
  deviceState.pb.conn = 0;
  }
  payload = { channels: deviceState.pb.channels, conn: deviceState.pb.conn, current_b_id: deviceState.pb.current_b_id };
+ } else if (key === 'input') {
+ // [v2.0 신규] {"in":[...],"count":[...]} → {p4..p7, cnt4..cnt7}
+ payload = normalizeInputPayload(payload);
+ Object.assign(deviceState.input, payload);
  } else {
  Object.assign(deviceState[key], payload);
  }
@@ -239,7 +283,7 @@ setInterval(() => {
 app.use(express.static(path.join(__dirname, 'public'))); 
 
 io.on('connection', (socket) => {
- socket.emit('initial_state', { ...deviceState, _hourlyPowerStats: hourlyPowerStats, _mqttLogSession: mqttLogSession });
+ socket.emit('initial_state', { ...deviceState, _hourlyPowerStats: hourlyPowerStats, _powerHistory: powerHistory, _mqttLogSession: mqttLogSession });
  
  socket.on('update_schedule_config', ({ type, time, flags }) => {
  if (!time || !time.includes(':')) return;
@@ -274,10 +318,33 @@ io.on('connection', (socket) => {
  socket.on('control_cmd', ({ device, cmd }) => {
  const activeBid = deviceState.pb.current_b_id;
  
- if (device === 'dev' || cmd.reset !== undefined || cmd.reset_pb !== undefined) {
+ // ★ v2.0 수정: 기존에는 device==='dev' 이면 cmd 내용과 무관하게 무조건
+ //   DEV_RESET을 보내버리는 버그가 있었음 (예: set_net/set_broker 명령도
+ //   전부 리셋으로 대체되어 버림). "reset" 필드가 실제로 있을 때만 리셋.
+ if (cmd && (cmd.reset !== undefined || cmd.reset_pb !== undefined)) {
  const resetPacket = { reset: 'DEV_RESET' };
  mqttClient.publish(TOPICS.CMD_DEV, JSON.stringify(resetPacket), { qos: 1 });
  setAllOffline();
+ return;
+ }
+
+ // [v2.0 신규] 장치(dev) 대상 기타 명령 — 네트워크/브로커 설정 변경 등
+ // 명령 전송 후 보드가 재부팅되므로 응답(SET_NET/SET_BROKER stat)은
+ // mqtt_live_log 및 cmd_result 로 확인 가능
+ if (device === 'dev') {
+ mqttClient.publish(TOPICS.CMD_DEV, JSON.stringify(cmd), { qos: 1 });
+ io.emit('cmd_result', { success: true, device: 'dev', topic: 'sent' });
+ return;
+ }
+
+ // [v2.0 신규] 외부 입력 4채널 — 카운트 조회/초기화
+ if (device === 'input') {
+ mqttClient.publish(TOPICS.CMD_INPUT, JSON.stringify(cmd), { qos: 1 });
+ if (cmd.reset_count !== undefined) {
+ Object.assign(deviceState.input, { cnt4: 0, cnt5: 0, cnt6: 0, cnt7: 0 });
+ io.emit('device_update', { topic: TOPICS.TELE_INPUT, data: { ...deviceState.input } });
+ }
+ io.emit('cmd_result', { success: true, device: 'input', topic: 'sent' });
  return;
  }
  

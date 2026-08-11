@@ -1,56 +1,68 @@
-/**
- * @file 25LC256.h
- * @brief 25LC256-I/SN SPI EEPROM 드라이버 헤더
+/*
+ * 25LC256.h
+ *
+ *  Created on: May 13, 2024
+ *      Author: choi
  */
+
 #ifndef INC_25LC256_H_
 #define INC_25LC256_H_
 
+/* C++ detection */
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 #include "main.h"
+#include <stdbool.h>
 
-/* 25LC256 SPI EEPROM 명령어 정의 */
-#define EEPROM_WREN            0x06  /*!< Write Enable (쓰기 허용) */
-#define EEPROM_WRDI            0x04  /*!< Write Disable (쓰기 금지) */
-#define EEPROM_RDSR            0x05  /*!< Read Status Register (상태 읽기) */
-#define EEPROM_WRSR            0x01  /*!< Write Status Register (상태 쓰기) */
-#define EEPROM_READ            0x03  /*!< Read from Memory Array (데이터 읽기) */
-#define EEPROM_WRITE           0x02  /*!< Write to Memory Array (데이터 쓰기) */
 
-#define EEPROM_WIP_FLAG        0x01  /*!< Write In Progress (WIP) 비트 플래그 */
-#define EEPROM_PAGESIZE        64    /*!< 25LC256 하드웨어 페이지 크기 (64바이트) */
-#define EEPROM_BUFFER_SIZE     64
+/* M95040 SPI EEPROM defines */
+#define EEPROM_WREN  0x06  /*!< Write Enable */
+#define EEPROM_WRDI  0x04  /*!< Write Disable */
+#define EEPROM_RDSR  0x05  /*!< Read Status Register */
+#define EEPROM_WRSR  0x01  /*!< Write Status Register */
+#define EEPROM_READ  0x03  /*!< Read from Memory Array */
+#define EEPROM_WRITE 0x02  /*!< Write to Memory Array */
 
-/* 소프트웨어 CS(NSS) 제어 매크로 (CubeMX에서 생성된 핀 이름 매칭 필수) */
-/* 25LC256.h 매크로 안전성 교정본 */
-#define EEPROM_CS_LOW()   do { HAL_GPIO_WritePin(EEP_CS_GPIO_Port, EEP_CS_Pin, GPIO_PIN_RESET); } while(0)
-#define EEPROM_CS_HIGH()  do { HAL_GPIO_WritePin(EEP_CS_GPIO_Port, EEP_CS_Pin, GPIO_PIN_SET); } while(0)
+#define EEPROM_WIP_FLAG        0x01  /*!< Write In Progress (WIP) flag */
 
+#define EEPROM_PAGESIZE        64    /*!< Pagesize according to documentation */
+#define EEPROM_BUFFER_SIZE     64    /*!< EEPROM Buffer size. Setup to your needs */
+
+#define EEPROM_CS_LOW()		HAL_GPIO_WritePin(EEP_CS_GPIO_Port, EEP_CS_Pin, GPIO_PIN_RESET);	// CS low
+#define EEPROM_CS_HIGH()	HAL_GPIO_WritePin(EEP_CS_GPIO_Port, EEP_CS_Pin, GPIO_PIN_SET);		// CS high
 
 /**
- * @brief EEPROM 동작 처리 상태 반환 구조체
+ * @brief EEPROM Operations statuses
  */
 typedef enum {
-    EEPROM_STATUS_PENDING,
-    EEPROM_STATUS_COMPLETE,
-    EEPROM_STATUS_ERROR
+	EEPROM_STATUS_PENDING,
+	EEPROM_STATUS_COMPLETE,
+	EEPROM_STATUS_ERROR
 } EepromOperations;
 
-/* 전역 함수 프로토타입 정의 */
-void EEPROM_SPI_INIT(SPI_HandleTypeDef *hspi);
-EepromOperations EEPROM_SPI_ReadBuffer(uint8_t* pBuffer, uint16_t ReadAddr, uint16_t NumByteToRead);
+void EEPROM_SPI_INIT(SPI_HandleTypeDef * hspi);
 EepromOperations EEPROM_SPI_WriteBuffer(uint8_t* pBuffer, uint16_t WriteAddr, uint16_t NumByteToWrite);
 EepromOperations EEPROM_SPI_WritePage(uint8_t* pBuffer, uint16_t WriteAddr, uint16_t NumByteToWrite);
+EepromOperations EEPROM_SPI_ReadBuffer(uint8_t* pBuffer, uint16_t ReadAddr, uint16_t NumByteToRead);
 uint8_t EEPROM_SPI_WaitStandbyState(void);
 
-/* 하위 레이어 로우레벨 제어 함수 */
-uint8_t EEPROM_SendByte(uint8_t byte);
-void sEE_WriteEnable(void);
+/* ★ 2026-08-10 신규: EEPROM이 실제로 응답하는지 30ms 안에 빠르게 확인.
+   false면 net_config.c는 이후 모든 EEPROM I/O를 건너뛰고 config.h
+   기본값으로 즉시 폴백해야 합니다 (MCU가 멈추는 일을 방지). */
+bool EEPROM_SPI_Probe(void);
+
+/* Low layer functions
+   ★ 2026-08-10: 반환형을 EepromOperations로 변경 (기존 void → 에러 전파 가능하게).
+   EEPROM_SendByte는 미사용이라 제거했습니다. */
+EepromOperations sEE_WriteEnable(void);
 void sEE_WriteDisable(void);
 void sEE_WriteStatusRegister(uint8_t regval);
-void EEPROM_SPI_SendInstruction(uint8_t *instruction, uint8_t size);
+uint8_t sEE_ReadStatusRegister(void);
+
+EepromOperations EEPROM_SPI_SendInstruction(uint8_t *instruction, uint8_t size);
+void  EEPROM_SPI_ReadStatusByte(SPI_HandleTypeDef SPIe, uint8_t *statusByte );
 
 #ifdef __cplusplus
 }

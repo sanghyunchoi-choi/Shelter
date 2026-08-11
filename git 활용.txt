@@ -19,6 +19,12 @@ git add .
 git commit -m "[0809] DHCP 변경"
 git push origin main
 
+3.  github의 파일 그냥 내려 받기 
+D:\2026.05.08\2025_project\2)smarttech\Project\Shelter\2026.05.25_final\MOS_version>git fetch origin
+
+D:\2026.05.08\2025_project\2)smarttech\Project\Shelter\2026.05.25_final\MOS_version>git reset --hard origin/main
+HEAD is now at 8736f77 [0810] DHCP/IP변경 적용 eeprom 미흡
+
 ==================================================================================
 상현 git URL --> https://github.com/sanghyunchoi-choi/Shelter
 

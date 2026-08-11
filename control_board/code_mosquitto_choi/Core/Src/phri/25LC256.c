@@ -1,268 +1,336 @@
-/**
- * @file 25LC256.c
- * @brief 25LC256-I/SN SPI EEPROM 드라이버 구현부 (프로덕션 릴리즈 버전)
+/*
+ * 25LC256.c
+ *
+ *  Created on: May 13, 2024
+ *      Author: choi
+ *
+ * ============================================================================
+ * ★★★ 2026-08-10 전면 재검토 ★★★
+ * 이 파일에는 타임아웃이 없는 busy-wait가 6곳 있었고, 통신 실패 시
+ * Error_Handler()를 호출하는 곳이 3곳 있었습니다. 이 프로젝트의
+ * Error_Handler()는 다음과 같습니다 (Core/Src/main.c):
+ *     __disable_irq();
+ *     while (1) {}
+ * 즉 EEPROM이 배선되어 있지 않거나 응답하지 않으면(현장에서 실제로
+ * 발생한 상황) MCU 전체가 인터럽트까지 꺼진 채로 영구 정지합니다.
+ * MQTT는 물론 아무것도 동작하지 않게 됩니다 — 이번에 NetConfig_Load()/
+ * NetConfig_CheckRollback()을 켜면 접속이 안 되던 원인이 바로 이것입니다.
+ *
+ * 이번 수정 원칙:
+ *   1) 모든 대기 루프에 HAL_GetTick() 기준의 확정적 타임아웃을 둡니다.
+ *   2) Error_Handler()를 절대 호출하지 않고, 항상 에러 코드를 반환합니다.
+ *   3) 타임아웃/에러 발생 시 EEPROM_SPI->State를 강제로 READY로 되돌려
+ *      다음 호출이 곧바로 또 멈추지 않도록 합니다(HAL_SPI_Abort 시도 후
+ *      실패해도 State를 직접 복구).
+ *   4) EEPROM_SPI_Probe()를 신규 추가 — 아주 짧은 타임아웃(30ms)으로
+ *      EEPROM 존재 여부만 빠르게 확인해, 없으면 이후 모든 읽기/쓰기를
+ *      net_config.c 쪽에서 건너뛸 수 있게 합니다.
+ * ============================================================================
  */
+
 #include "25LC256.h"
 
-static SPI_HandleTypeDef *EEPROM_SPI = NULL;
+SPI_HandleTypeDef *EEPROM_SPI;
+
 uint8_t EEPROM_StatusByte;
 uint8_t RxBuffer[EEPROM_BUFFER_SIZE] = {0x00};
 
-// OS 기동 전 하드웨어 타이머 정지를 대비한 마이크로초 레벨 로우레벨 딜레이
-static void software_delay_us(uint32_t us) {
-    volatile uint32_t count = us * 24; // 보드 클록에 맞춘 스핀 루프
-    while(count--) {
-        __NOP();
-    }
-}
+/* 단일 SPI 트랜잭션(HAL 호출 1건)에 허용하는 최대 대기 시간.
+   개별 HAL_SPI_Transmit/Receive 호출 자체의 timeout 인자와는 별개로,
+   "State != READY"류 대기 루프에 적용하는 상한입니다. */
+#define EEPROM_OP_TIMEOUT_MS   100U
 
-/**
- * @brief  EEPROM 드라이버를 초기화하고, 칩 내부의 모든 하드웨어 쓰기 잠금(Block Protection)을 강제 해제합니다.
- */
-void EEPROM_SPI_INIT(SPI_HandleTypeDef *hspi) {
+void EEPROM_SPI_INIT(SPI_HandleTypeDef * hspi) {
     EEPROM_SPI = hspi;
-
-    // 1. 상태 레지스터 수정을 위해 쓰기 허용 가동
-    sEE_WriteEnable();
-    software_delay_us(50);
-
-    // 2. WRSR (Write Status Register, 0x01) 명령어 패킷 구성
-    uint8_t status_cmd[2];
-    status_cmd[0] = EEPROM_WRSR; // 상태 레지스터 쓰기 명령
-    status_cmd[1] = 0x00;        // ★ 핵심: WPEN=0, BP1=0, BP0=0 (모든 메모리 영역 잠금 강제 해제!!)
-
-    // 3. 단일 패킷으로 묶어서 상태 레지스터에 다이렉트 주입
-    EEPROM_CS_LOW();
-    HAL_SPI_Transmit(EEPROM_SPI, status_cmd, 2, 100);
-    EEPROM_CS_HIGH();
-
-    // 4. 상태 레지스터 반영 물리 대기
-    EEPROM_SPI_WaitStandbyState();
-
-    // 5. 쓰기 금지 리셋으로 초기화 마무리
-    sEE_WriteDisable();
 }
 
+/**
+ * @brief 통신 실패/타임아웃 이후 SPI 핸들 상태를 안전하게 복구합니다.
+ *        Error_Handler()로 MCU를 멈추는 대신, 다음 호출이 즉시 재시도할 수
+ *        있도록 상태만 정리합니다.
+ */
+static void EEPROM_SPI_RecoverState(void) {
+    if (EEPROM_SPI == NULL) return;
+    HAL_SPI_Abort(EEPROM_SPI);          /* 진행 중인 트랜잭션 강제 중단 시도 */
+    EEPROM_SPI->State = HAL_SPI_STATE_READY;  /* Abort가 실패해도 강제로 READY 복구 */
+    EEPROM_CS_HIGH();
+}
 
 /**
- * @brief  EEPROM의 1개 페이지(64바이트 이내) 영역에 데이터를 기록합니다.
+ * @brief EEPROM이 실제로 응답하는지 아주 짧게(30ms) 확인합니다.
+ *        net_config.c는 이 함수가 실패하면 이후 모든 EEPROM I/O를 건너뛰고
+ *        즉시 config.h 기본값으로 폴백해야 합니다.
+ * @return true = 응답함(정상), false = 응답 없음/타임아웃
  */
+bool EEPROM_SPI_Probe(void) {
+    if (EEPROM_SPI == NULL) return false;
+
+    uint8_t command[1] = { EEPROM_RDSR };
+    uint8_t status[1] = { 0 };
+
+    uint32_t start = HAL_GetTick();
+    while (EEPROM_SPI->State != HAL_SPI_STATE_READY) {
+        if ((HAL_GetTick() - start) > 30) { EEPROM_SPI_RecoverState(); return false; }
+    }
+
+    EEPROM_CS_LOW();
+    HAL_StatusTypeDef st1 = HAL_SPI_Transmit(EEPROM_SPI, command, 1, 30);
+    HAL_StatusTypeDef st2 = HAL_SPI_Receive(EEPROM_SPI, status, 1, 30);
+    EEPROM_CS_HIGH();
+
+    if (st1 != HAL_OK || st2 != HAL_OK) {
+        EEPROM_SPI_RecoverState();
+        return false;
+    }
+    return true;
+}
+
 EepromOperations EEPROM_SPI_WritePage(uint8_t* pBuffer, uint16_t WriteAddr, uint16_t NumByteToWrite) {
-    if (EEPROM_SPI == NULL) return EEPROM_STATUS_ERROR;
+	uint32_t t0 = HAL_GetTick();
+	while (EEPROM_SPI->State != HAL_SPI_STATE_READY) {
+		if ((HAL_GetTick() - t0) > EEPROM_OP_TIMEOUT_MS) { EEPROM_SPI_RecoverState(); return EEPROM_STATUS_ERROR; }
+	}
 
-    HAL_StatusTypeDef spiStatus;
+	HAL_StatusTypeDef spiTransmitStatus = HAL_ERROR;
 
-    // 헤더(3바이트) + 최대 페이지 크기(64바이트)를 커버하는 단일 임시 패킷 버퍼 생성
-    uint8_t tx_packet[3 + 64];
+	if (sEE_WriteEnable() != EEPROM_STATUS_COMPLETE) {
+		return EEPROM_STATUS_ERROR;
+	}
 
-    // 안전 가드: 페이지 크기 초과 방지
-    if (NumByteToWrite > 64) NumByteToWrite = 64;
+	uint8_t header[3];
+	header[0] = EEPROM_WRITE;
+	header[1] = WriteAddr >> 8;
+	header[2] = WriteAddr;
 
-    sEE_WriteEnable();
+	EEPROM_CS_LOW();
 
-    // 단일 연속 메모리 공간에 명령어, 주소, 실제 데이터를 촘촘하게 패킹
-    tx_packet[0] = EEPROM_WRITE;
-    tx_packet[1] = (uint8_t)(WriteAddr >> 8);
-    tx_packet[2] = (uint8_t)(WriteAddr);
+	if (EEPROM_SPI_SendInstruction((uint8_t*)header, 3) != EEPROM_STATUS_COMPLETE) {
+		EEPROM_CS_HIGH();
+		return EEPROM_STATUS_ERROR;
+	}
 
-    // 데이터 내용을 헤더 바로 뒤 바이트 공간에 밀착 복사
-    memcpy(&tx_packet[3], pBuffer, NumByteToWrite);
+	for (uint8_t i = 0; i < 5; i++) {
+		spiTransmitStatus = HAL_SPI_Transmit(EEPROM_SPI, pBuffer, NumByteToWrite, 100);
+		if (spiTransmitStatus == HAL_BUSY) {
+			HAL_Delay(5);
+		} else {
+			break;
+		}
+	}
 
-    // 하드웨어 통신 시작 (CS Low)
-    EEPROM_CS_LOW();
+	EEPROM_CS_HIGH();
 
-    // ★ [치명적인 버그 수정] 단 한 번의 락업 없는 다이렉트 송신으로 버스 끊김을 완벽 차단합니다.
-    spiStatus = HAL_SPI_Transmit(EEPROM_SPI, tx_packet, 3 + NumByteToWrite, 300);
+	if (spiTransmitStatus != HAL_OK) {
+		EEPROM_SPI_RecoverState();
+		return EEPROM_STATUS_ERROR;
+	}
 
-    // 하드웨어 통신 종료 (CS High)
-    EEPROM_CS_HIGH();
+	if (EEPROM_SPI_WaitStandbyState() != 0) {
+		return EEPROM_STATUS_ERROR;
+	}
 
-    // EEPROM의 내부 하드웨어 물리 저장 대기 (WIP 폴링)
-    if (EEPROM_SPI_WaitStandbyState() != 0) {
-        return EEPROM_STATUS_ERROR;
-    }
+	sEE_WriteDisable();
 
-    sEE_WriteDisable();
-
-    if (spiStatus != HAL_OK) return EEPROM_STATUS_ERROR;
-    return EEPROM_STATUS_COMPLETE;
+	return EEPROM_STATUS_COMPLETE;
 }
 
-
-/**
- * @brief  페이지 경계를 자동 연산하여 임의 크기의 대량 데이터를 분할 기록합니다.
- */
 EepromOperations EEPROM_SPI_WriteBuffer(uint8_t* pBuffer, uint16_t WriteAddr, uint16_t NumByteToWrite) {
-    uint16_t NumOfPage = 0, NumOfSingle = 0, Addr = 0, count = 0, temp = 0;
-    uint16_t sEE_DataNum = 0;
-    EepromOperations pageWriteStatus = EEPROM_STATUS_PENDING;
+	uint16_t NumOfPage = 0, NumOfSingle = 0, Addr = 0, count = 0, temp = 0;
+	uint16_t sEE_DataNum = 0;
 
-    Addr = WriteAddr % EEPROM_PAGESIZE;
-    count = EEPROM_PAGESIZE - Addr;
-    NumOfPage =  NumByteToWrite / EEPROM_PAGESIZE;
-    NumOfSingle = NumByteToWrite % EEPROM_PAGESIZE;
+	EepromOperations pageWriteStatus = EEPROM_STATUS_PENDING;
 
-    if (Addr == 0) {
-        if (NumOfPage == 0) {
-            sEE_DataNum = NumByteToWrite;
-            pageWriteStatus = EEPROM_SPI_WritePage(pBuffer, WriteAddr, sEE_DataNum);
-            if (pageWriteStatus != EEPROM_STATUS_COMPLETE) return pageWriteStatus;
-        } else {
-            while (NumOfPage--) {
-                sEE_DataNum = EEPROM_PAGESIZE;
-                pageWriteStatus = EEPROM_SPI_WritePage(pBuffer, WriteAddr, sEE_DataNum);
-                if (pageWriteStatus != EEPROM_STATUS_COMPLETE) return pageWriteStatus;
-                WriteAddr +=  EEPROM_PAGESIZE;
-                pBuffer += EEPROM_PAGESIZE;
-            }
-            if (NumOfSingle != 0) {
-                sEE_DataNum = NumOfSingle;
-                pageWriteStatus = EEPROM_SPI_WritePage(pBuffer, WriteAddr, sEE_DataNum);
-                if (pageWriteStatus != EEPROM_STATUS_COMPLETE) return pageWriteStatus;
-            }
-        }
-    } else {
-        if (NumOfPage == 0) {
-            if (NumOfSingle > count) {
-                temp = NumOfSingle - count;
-                sEE_DataNum = count;
-                pageWriteStatus = EEPROM_SPI_WritePage(pBuffer, WriteAddr, sEE_DataNum);
-                if (pageWriteStatus != EEPROM_STATUS_COMPLETE) return pageWriteStatus;
+	Addr = WriteAddr % EEPROM_PAGESIZE;
+	count = EEPROM_PAGESIZE - Addr;
+	NumOfPage =  NumByteToWrite / EEPROM_PAGESIZE;
+	NumOfSingle = NumByteToWrite % EEPROM_PAGESIZE;
 
-                WriteAddr +=  count;
-                pBuffer += count;
-                sEE_DataNum = temp;
-                pageWriteStatus = EEPROM_SPI_WritePage(pBuffer, WriteAddr, sEE_DataNum);
-            } else {
-                sEE_DataNum = NumByteToWrite;
-                pageWriteStatus = EEPROM_SPI_WritePage(pBuffer, WriteAddr, sEE_DataNum);
-            }
-            if (pageWriteStatus != EEPROM_STATUS_COMPLETE) return pageWriteStatus;
-        } else {
-            NumByteToWrite -= count;
-            NumOfPage =  NumByteToWrite / EEPROM_PAGESIZE;
-            NumOfSingle = NumByteToWrite % EEPROM_PAGESIZE;
+	if (Addr == 0) {
+		if (NumOfPage == 0) {
+			sEE_DataNum = NumByteToWrite;
+			pageWriteStatus = EEPROM_SPI_WritePage(pBuffer, WriteAddr, sEE_DataNum);
+			if (pageWriteStatus != EEPROM_STATUS_COMPLETE) return pageWriteStatus;
+		} else {
+			while (NumOfPage--) {
+				sEE_DataNum = EEPROM_PAGESIZE;
+				pageWriteStatus = EEPROM_SPI_WritePage(pBuffer, WriteAddr, sEE_DataNum);
+				if (pageWriteStatus != EEPROM_STATUS_COMPLETE) return pageWriteStatus;
+				WriteAddr +=  EEPROM_PAGESIZE;
+				pBuffer += EEPROM_PAGESIZE;
+			}
+			sEE_DataNum = NumOfSingle;
+			pageWriteStatus = EEPROM_SPI_WritePage(pBuffer, WriteAddr, sEE_DataNum);
+			if (pageWriteStatus != EEPROM_STATUS_COMPLETE) return pageWriteStatus;
+		}
+	} else {
+		if (NumOfPage == 0) {
+			if (NumOfSingle > count) {
+				temp = NumOfSingle - count;
+				sEE_DataNum = count;
+				pageWriteStatus = EEPROM_SPI_WritePage(pBuffer, WriteAddr, sEE_DataNum);
+				if (pageWriteStatus != EEPROM_STATUS_COMPLETE) return pageWriteStatus;
+				WriteAddr +=  count;
+				pBuffer += count;
+				sEE_DataNum = temp;
+				pageWriteStatus = EEPROM_SPI_WritePage(pBuffer, WriteAddr, sEE_DataNum);
+			} else {
+				sEE_DataNum = NumByteToWrite;
+				pageWriteStatus = EEPROM_SPI_WritePage(pBuffer, WriteAddr, sEE_DataNum);
+			}
+			if (pageWriteStatus != EEPROM_STATUS_COMPLETE) return pageWriteStatus;
+		} else {
+			NumByteToWrite -= count;
+			NumOfPage =  NumByteToWrite / EEPROM_PAGESIZE;
+			NumOfSingle = NumByteToWrite % EEPROM_PAGESIZE;
+			sEE_DataNum = count;
+			pageWriteStatus = EEPROM_SPI_WritePage(pBuffer, WriteAddr, sEE_DataNum);
+			if (pageWriteStatus != EEPROM_STATUS_COMPLETE) return pageWriteStatus;
+			WriteAddr +=  count;
+			pBuffer += count;
 
-            sEE_DataNum = count;
-            pageWriteStatus = EEPROM_SPI_WritePage(pBuffer, WriteAddr, sEE_DataNum);
-            if (pageWriteStatus != EEPROM_STATUS_COMPLETE) return pageWriteStatus;
+			while (NumOfPage--) {
+				sEE_DataNum = EEPROM_PAGESIZE;
+				pageWriteStatus = EEPROM_SPI_WritePage(pBuffer, WriteAddr, sEE_DataNum);
+				if (pageWriteStatus != EEPROM_STATUS_COMPLETE) return pageWriteStatus;
+				WriteAddr +=  EEPROM_PAGESIZE;
+				pBuffer += EEPROM_PAGESIZE;
+			}
 
-            WriteAddr +=  count;
-            pBuffer += count;
+			if (NumOfSingle != 0) {
+				sEE_DataNum = NumOfSingle;
+				pageWriteStatus = EEPROM_SPI_WritePage(pBuffer, WriteAddr, sEE_DataNum);
+				if (pageWriteStatus != EEPROM_STATUS_COMPLETE) return pageWriteStatus;
+			}
+		}
+	}
 
-            while (NumOfPage--) {
-                sEE_DataNum = EEPROM_PAGESIZE;
-                pageWriteStatus = EEPROM_SPI_WritePage(pBuffer, WriteAddr, sEE_DataNum);
-                if (pageWriteStatus != EEPROM_STATUS_COMPLETE) return pageWriteStatus;
-                WriteAddr +=  EEPROM_PAGESIZE;
-                pBuffer += EEPROM_PAGESIZE;
-            }
-            if (NumOfSingle != 0) {
-                sEE_DataNum = NumOfSingle;
-                pageWriteStatus = EEPROM_SPI_WritePage(pBuffer, WriteAddr, sEE_DataNum);
-                if (pageWriteStatus != EEPROM_STATUS_COMPLETE) return pageWriteStatus;
-            }
-        }
-    }
-    return EEPROM_STATUS_COMPLETE;
+	return EEPROM_STATUS_COMPLETE;
 }
 
-/**
- * @brief  임의 오프셋 주소로부터 정적 데이터를 읽어옵니다.
- */
 EepromOperations EEPROM_SPI_ReadBuffer(uint8_t* pBuffer, uint16_t ReadAddr, uint16_t NumByteToRead) {
-    if (EEPROM_SPI == NULL) return EEPROM_STATUS_ERROR;
+	uint32_t t0 = HAL_GetTick();
+	while (EEPROM_SPI->State != HAL_SPI_STATE_READY) {
+		if ((HAL_GetTick() - t0) > EEPROM_OP_TIMEOUT_MS) { EEPROM_SPI_RecoverState(); return EEPROM_STATUS_ERROR; }
+	}
 
-    uint8_t header[3];
+	uint8_t header[3];
+	header[0] = EEPROM_READ;
+	header[1] = ReadAddr >> 8;
+	header[2] = ReadAddr;
 
-    header[0] = EEPROM_READ;
-    header[1] = (uint8_t)(ReadAddr >> 8);
-    header[2] = (uint8_t)(ReadAddr);
+	EEPROM_CS_LOW();
 
-    EEPROM_CS_LOW();
+	if (EEPROM_SPI_SendInstruction(header, 3) != EEPROM_STATUS_COMPLETE) {
+		EEPROM_CS_HIGH();
+		return EEPROM_STATUS_ERROR;
+	}
 
-    if (HAL_SPI_Transmit(EEPROM_SPI, header, 3, 100) != HAL_OK) {
-        EEPROM_CS_HIGH();
-        return EEPROM_STATUS_ERROR;
-    }
+	HAL_StatusTypeDef rx_st;
+	uint32_t t1 = HAL_GetTick();
+	do {
+		rx_st = HAL_SPI_Receive(EEPROM_SPI, (uint8_t*)pBuffer, NumByteToRead, 200);
+		if (rx_st == HAL_BUSY) {
+			if ((HAL_GetTick() - t1) > EEPROM_OP_TIMEOUT_MS) {
+				EEPROM_CS_HIGH();
+				EEPROM_SPI_RecoverState();
+				return EEPROM_STATUS_ERROR;
+			}
+			HAL_Delay(1);
+		}
+	} while (rx_st == HAL_BUSY);
 
-    HAL_StatusTypeDef rxStatus = HAL_SPI_Receive(EEPROM_SPI, pBuffer, NumByteToRead, 500);
+	EEPROM_CS_HIGH();
 
-    EEPROM_CS_HIGH();
+	if (rx_st != HAL_OK) {
+		EEPROM_SPI_RecoverState();
+		return EEPROM_STATUS_ERROR;
+	}
 
-    if (rxStatus != HAL_OK) {
-        return EEPROM_STATUS_ERROR;
-    }
-    return EEPROM_STATUS_COMPLETE;
-}
-
-uint8_t EEPROM_SendByte(uint8_t byte) {
-    uint8_t answerByte = 0xFF;
-    if (EEPROM_SPI == NULL) return 0xFF;
-
-    if (HAL_SPI_TransmitReceive(EEPROM_SPI, &byte, &answerByte, 1, 200) != HAL_OK) {
-        return 0xFF;
-    }
-    return answerByte;
-}
-
-void sEE_WriteEnable(void) {
-    uint8_t command = EEPROM_WREN;
-    EEPROM_CS_LOW();
-    HAL_SPI_Transmit(EEPROM_SPI, &command, 1, 100);
-    EEPROM_CS_HIGH();
-}
-
-void sEE_WriteDisable(void) {
-    uint8_t command = EEPROM_WRDI;
-    EEPROM_CS_LOW();
-    HAL_SPI_Transmit(EEPROM_SPI, &command, 1, 100);
-    EEPROM_CS_HIGH();
-}
-
-void sEE_WriteStatusRegister(uint8_t regval) {
-    uint8_t command[2];
-    command[0] = EEPROM_WRSR;
-    command[1] = regval;
-
-    sEE_WriteEnable();
-
-    EEPROM_CS_LOW();
-    HAL_SPI_Transmit(EEPROM_SPI, command, 2, 100);
-    EEPROM_CS_HIGH();
-
-    sEE_WriteDisable();
+	return EEPROM_STATUS_COMPLETE;
 }
 
 /**
- * @brief  WIP 플래그를 폴링하여 내부 물리 저장이 완료될 때까지 대기합니다.
+ * @brief  Enables the write access to the EEPROM.
+ * @retval EEPROM_STATUS_COMPLETE / EEPROM_STATUS_ERROR
+ */
+EepromOperations sEE_WriteEnable(void) {
+	EEPROM_CS_LOW();
+	uint8_t command[1] = { EEPROM_WREN };
+	EepromOperations st = EEPROM_SPI_SendInstruction((uint8_t*)command, 1);
+	EEPROM_CS_HIGH();
+	return st;
+}
+
+/**
+ * @brief  Disables the write access to the EEPROM.
+ */
+void sEE_WriteDisable(void) {
+	EEPROM_CS_LOW();
+	uint8_t command[1] = { EEPROM_WRDI };
+	EEPROM_SPI_SendInstruction((uint8_t*)command, 1);
+	EEPROM_CS_HIGH();
+}
+
+/**
+ * @brief  Polls the WIP flag until write completes, with a hard timeout.
+ * @retval 0 = 정상 완료, 1 = 실패/타임아웃
  */
 uint8_t EEPROM_SPI_WaitStandbyState(void) {
-    if (EEPROM_SPI == NULL) return 1;
+	uint8_t sEEstatus[1] = { 0x00 };
+	uint8_t command[1] = { EEPROM_RDSR };
 
-    uint8_t sEEstatus = 0x00;
-    uint8_t command = EEPROM_RDSR;
-    uint32_t safety_counter = 2000;
+	EEPROM_CS_LOW();
 
-    do {
-        EEPROM_CS_LOW();
-        if (HAL_SPI_Transmit(EEPROM_SPI, &command, 1, 50) == HAL_OK) {
-            HAL_SPI_Receive(EEPROM_SPI, &sEEstatus, 1, 50);
-        }
-        EEPROM_CS_HIGH();
+	if (EEPROM_SPI_SendInstruction((uint8_t*)command, 1) != EEPROM_STATUS_COMPLETE) {
+		EEPROM_CS_HIGH();
+		return 1;
+	}
 
-        if (safety_counter-- == 0) {
-            return 1;
-        }
+	uint32_t wait_start = HAL_GetTick();
+	do {
+		HAL_StatusTypeDef rx_st;
+		do {
+			rx_st = HAL_SPI_Receive(EEPROM_SPI, (uint8_t*)sEEstatus, 1, 200);
+			if (rx_st == HAL_BUSY) {
+				if ((HAL_GetTick() - wait_start) > 200) {
+					EEPROM_CS_HIGH();
+					EEPROM_SPI_RecoverState();
+					return 1;
+				}
+				HAL_Delay(1);
+			}
+		} while (rx_st == HAL_BUSY);
 
-        software_delay_us(50);
+		if (rx_st != HAL_OK) {
+			EEPROM_CS_HIGH();
+			EEPROM_SPI_RecoverState();
+			return 1;
+		}
 
-    } while ((sEEstatus & EEPROM_WIP_FLAG) != 0);
+		if ((HAL_GetTick() - wait_start) > 200) {
+			EEPROM_CS_HIGH();
+			return 1;
+		}
+		HAL_Delay(1);
+	} while ((sEEstatus[0] & EEPROM_WIP_FLAG) == SET);
 
-    return 0;
+	EEPROM_CS_HIGH();
+	return 0;
 }
 
-void EEPROM_SPI_SendInstruction(uint8_t *instruction, uint8_t size) {
-    if (EEPROM_SPI == NULL) return;
-    HAL_SPI_Transmit(EEPROM_SPI, instruction, size, 200);
+/**
+ * @brief Low level function to send header data to EEPROM.
+ * @retval EEPROM_STATUS_COMPLETE / EEPROM_STATUS_ERROR
+ */
+EepromOperations EEPROM_SPI_SendInstruction(uint8_t *instruction, uint8_t size) {
+	uint32_t t0 = HAL_GetTick();
+	while (EEPROM_SPI->State == HAL_SPI_STATE_RESET) {
+		if ((HAL_GetTick() - t0) > EEPROM_OP_TIMEOUT_MS) { EEPROM_SPI_RecoverState(); return EEPROM_STATUS_ERROR; }
+	}
+
+	if (HAL_SPI_Transmit(EEPROM_SPI, (uint8_t*)instruction, (uint16_t)size, 200) != HAL_OK) {
+		EEPROM_SPI_RecoverState();
+		return EEPROM_STATUS_ERROR;
+	}
+	return EEPROM_STATUS_COMPLETE;
 }

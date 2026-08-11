@@ -608,75 +608,68 @@ void MQTT_MessageArrived(MessageData* md) {
 		   → EEPROM에 저장 후 500ms 뒤 재부팅하여 적용. 재부팅 후 MQTT 연결에
 		     성공하면 자동으로 "확정"되고, 실패가 누적되면 이전 설정으로
 		     자동 복구됩니다 (net_config.c 참고). */
-        else if (strstr(payload, "\"set_net\"") != NULL) {
-            NetRuntimeConfig new_cfg = g_net_cfg;   // 브로커 등 나머지 필드는 기존 값 유지
-            int ip[4] = {0}, sn[4] = {0}, gw[4] = {0}, dns[4] = {0};
-            bool ok = false;
+		/* =============================================================================
+		 * [CASE 3: 제어보드 고정 IP 주소 설정 및 STATIC 모드 영구 전환]
+		 * 규격: {"set_net":{"ip":[192,168,0,114],"sn":[255,255,255,0],"gw":[192,168,0,1],"dns":[8,8,8,8]}}
+		 * ============================================================================= */
+		else if (strstr(payload, "\"set_net\"") != NULL) {
+			NetRuntimeConfig new_cfg = g_net_cfg;   // 브로커 등 나머지 필드는 기존 값 유지
+			int ip[4] = {0}, sn[4] = {0}, gw[4] = {0}, dns[4] = {0};
+			bool ok = false;
 
-            if (strstr(payload, "\"ip\"") &&
-                sscanf(strstr(payload, "\"ip\""),
-                        "\"ip\":[%d,%d,%d,%d]", &ip[0],&ip[1],&ip[2],&ip[3]) == 4 &&
-                strstr(payload, "\"sn\"") &&
-                sscanf(strstr(payload, "\"sn\""),
-                        "\"sn\":[%d,%d,%d,%d]", &sn[0],&sn[1],&sn[2],&sn[3]) == 4 &&
-                strstr(payload, "\"gw\"") &&
-                sscanf(strstr(payload, "\"gw\""),
-                        "\"gw\":[%d,%d,%d,%d]", &gw[0],&gw[1],&gw[2],&gw[3]) == 4) {
+			if (strstr(payload, "\"ip\"") &&
+				sscanf(strstr(payload, "\"ip\""), "\"ip\":[%d,%d,%d,%d]", &ip[0],&ip[1],&ip[2],&ip[3]) == 4 &&
+				strstr(payload, "\"sn\"") &&
+				sscanf(strstr(payload, "\"sn\""), "\"sn\":[%d,%d,%d,%d]", &sn[0],&sn[1],&sn[2],&sn[3]) == 4 &&
+				strstr(payload, "\"gw\"") &&
+				sscanf(strstr(payload, "\"gw\""), "\"gw\":[%d,%d,%d,%d]", &gw[0],&gw[1],&gw[2],&gw[3]) == 4) {
 
-                for (int i = 0; i < 4; i++) {
-                    new_cfg.ip[i] = (uint8_t)ip[i];
-                    new_cfg.sn[i] = (uint8_t)sn[i];
-                    new_cfg.gw[i] = (uint8_t)gw[i];
-                }
+				for (int i = 0; i < 4; i++) {
+					new_cfg.ip[i] = (uint8_t)ip[i];
+					new_cfg.sn[i] = (uint8_t)sn[i];
+					new_cfg.gw[i] = (uint8_t)gw[i];
+				}
+				/* dns는 선택 항목 — 없으면 기존 값 유지 */
+				if (strstr(payload, "\"dns\"") &&
+					sscanf(strstr(payload, "\"dns\""), "\"dns\":[%d,%d,%d,%d]", &dns[0],&dns[1],&dns[2],&dns[3]) == 4) {
+					for (int i = 0; i < 4; i++) new_cfg.dns[i] = (uint8_t)dns[i];
+				}
 
-                /* dns는 선택 항목 — 없으면 기존 값 유지 */
-                if (strstr(payload, "\"dns\"") &&
-                    sscanf(strstr(payload, "\"dns\""),
-                            "\"dns\":[%d,%d,%d,%d]", &dns[0],&dns[1],&dns[2],&dns[3]) == 4) {
-                    for (int i = 0; i < 4; i++) new_cfg.dns[i] = (uint8_t)dns[i];
-                }
+				// ★ 핵심: 서버가 IP를 명시했으므로 이제 런타임 구동 모드를 STATIC(0)으로 영구 변경!
+				new_cfg.net_mode = 0;
+				ok = true;
+			}
 
-                // ★ [핵심] 서버가 수동 정적 IP 정보를 하사했으므로 이제 런타임 모드를 STATIC(0)으로 전환!!
-                new_cfg.net_mode = 0;
-                ok = true;
-            }
+			if (ok) {
+				snprintf(p_buf, 1536, "{\"device\":\"SET_NET\",\"conn\":1,\"result\":1}");
+				MQTTPublish(&c, topics.stat_dev, &(MQTTMessage){QOS0, 0, 0, 0, p_buf, (int)strlen(p_buf)});
 
-            // 1. 서버에 설정 수신 결과 응답 패킷 전송 (리셋 전에 먼저 도달 완료 보장)
-            if (ok) {
-                snprintf(p_buf, 1536, "{\"device\":\"SET_NET\",\"conn\":1,\"result\":1}");
-            } else {
-                snprintf(p_buf, 1536, "{\"device\":\"SET_NET\",\"conn\":1,\"result\":0}");
-            }
-            MQTTPublish(&c, topics.stat_dev, &(MQTTMessage){QOS0, 0, 0, 0, p_buf, (int)strlen(p_buf)});
+				printf("[MQTT RX] set_net 파싱 성공 -> 내장 플래시 저장 및 하드웨어 리셋 가동\r\n");
+				osDelay(200); // MQTT 소켓 버퍼 송출을 위한 RTOS 최소 지연
+				free(p_buf);
 
-            // 2. 동기적 자원 해제 완료 후 EEPROM 영구 저장 및 재부팅 프로세스 위임
-            if (ok) {
-                printf("[MQTT RX] set_net 파싱 성공 -> 정적 IP 모드로 저장 후 하드웨어 리셋을 가동합니다.\r\n");
+				// 내장 플래시 밀어넣고 내부 리셋 완료까지 원스톱 제어 (리턴 없음)
+				NetConfig_SaveAndApply(&new_cfg);
+				return;
+			} else {
+				snprintf(p_buf, 1536, "{\"device\":\"SET_NET\",\"conn\":1,\"result\":0}");
+				MQTTPublish(&c, topics.stat_dev, &(MQTTMessage){QOS0, 0, 0, 0, p_buf, (int)strlen(p_buf)});
+				free(p_buf);
+				return;
+			}
+		}
 
-                // 메모리 릭 방지를 위해 힙 공간을 먼저 반환
-                free(p_buf);
-
-                // 이 함수 내부에서 EEPROM 라이팅 완료를 완벽히 보장한 뒤 시스템을 깨끗하게 하드웨어 리셋합니다.
-                NetConfig_SaveAndApply(&new_cfg);
-                return;
-            }
-
-            // 실패 시에는 리셋하지 않고 리턴하여 정상 루프 유지
-            free(p_buf);
-            return;
-        }
-
-
-		/* --- [CASE 4: MQTT 브로커 IP/포트 변경] v2.0 신규
-		   규격: {"set_broker":{"ip":[192,168,0,177],"port":1883}} */
+		/* =============================================================================
+		 * [CASE 4: MQTT 브로커 PC의 IP 및 포트 정보 변경]
+		 * 규격: {"set_broker":{"ip":[192,168,0,107],"port":1883}}
+		 * ============================================================================= */
 		else if (strstr(payload, "\"set_broker\"") != NULL) {
-			NetRuntimeConfig new_cfg = g_net_cfg;
+			NetRuntimeConfig new_cfg = g_net_cfg; // 보드 고정 IP 정보 등은 기존 값 유지
 			int ip[4] = {0}, port = 0;
 			bool ok = false;
 
 			if (strstr(payload, "\"ip\"") &&
-				sscanf(strstr(payload, "\"ip\""), "\"ip\":[%d,%d,%d,%d]",
-						&ip[0], &ip[1], &ip[2], &ip[3]) == 4) {
+				sscanf(strstr(payload, "\"ip\""), "\"ip\":[%d,%d,%d,%d]", &ip[0], &ip[1], &ip[2], &ip[3]) == 4) {
 				for (int i = 0; i < 4; i++) new_cfg.broker_ip[i] = (uint8_t)ip[i];
 				ok = true;
 			}
@@ -687,25 +680,49 @@ void MQTT_MessageArrived(MessageData* md) {
 			}
 
 			if (ok) {
-				NetConfig_SaveAndApply(&new_cfg);
 				snprintf(p_buf, 1536, "{\"device\":\"SET_BROKER\",\"conn\":1,\"result\":1}");
+				MQTTPublish(&c, topics.stat_dev, &(MQTTMessage){QOS0, 0, 0, 0, p_buf, (int)strlen(p_buf)});
+
+				printf("[MQTT RX] set_broker 파싱 성공 -> 내장 플래시 저장 및 하드웨어 리셋 가동\r\n");
+				osDelay(200);
+				free(p_buf);
+
+				NetConfig_SaveAndApply(&new_cfg);
+				return;
 			} else {
 				snprintf(p_buf, 1536, "{\"device\":\"SET_BROKER\",\"conn\":1,\"result\":0}");
+				MQTTPublish(&c, topics.stat_dev, &(MQTTMessage){QOS0, 0, 0, 0, p_buf, (int)strlen(p_buf)});
+				free(p_buf);
+				return;
 			}
+		}
+
+		/* =============================================================================
+		 * [CASE 5: 런타임 고정 IP 상태 완전 해제 및 최초 DHCP 상태 강제 복귀]
+		 * 규격: {"set_net_reset":{}} 또는 {"set_net_reset":1}
+		 * ============================================================================= */
+		else if (strstr(payload, "\"set_net_reset\"") != NULL) {
+			NetRuntimeConfig new_cfg = g_net_cfg;
+
+			// ★ 핵심: 정적 지정 주소를 타파하고 런타임 구동 기어를 다시 DHCP(1)로 원상 복구 시킵니다.
+			new_cfg.net_mode = 1;
+
+			snprintf(p_buf, 1536, "{\"device\":\"SET_NET_RESET\",\"conn\":1,\"result\":1}");
 			MQTTPublish(&c, topics.stat_dev, &(MQTTMessage){QOS0, 0, 0, 0, p_buf, (int)strlen(p_buf)});
 
-			if (ok) {
-				osDelay(500);
-				HAL_NVIC_SystemReset();
-			}
+			printf("[MQTT RX] set_net_reset 수신 -> STATIC 모드 초기화 후 DHCP 모드로 리셋 적용\r\n");
+			osDelay(200);
 			free(p_buf);
+
+			NetConfig_SaveAndApply(&new_cfg);
 			return;
 		}
 
-		// 명령어 불일치 시(Result: 0) 처리가 필요한 경우 여기에 else를 추가할 수 있습니다.
+		// 잘못된 명령어가 인입되었거나 예외 매칭 처리 스페이스
 		free(p_buf);
 		return;
 	}
+
 
 	/* ======================================================================
 	       6. [INPUT] 외부 입력 4채널 조회/카운트 초기화 (v2.0 신규)

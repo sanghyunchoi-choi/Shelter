@@ -52,8 +52,7 @@ Core/Src/phri/net_config.o: ../Core/Src/phri/net_config.c \
  ../Core/Inc/main.h ../Core/Inc/mqtt_handler.h \
  D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/Core/Src/phri/himpel.h \
  ../Core/Inc/config.h \
- D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/Core/Src/phri/modbus_lg.h \
- ../Core/Src/phri/25LC256.h
+ D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/Core/Src/phri/modbus_lg.h
 ../Core/Inc/net_config.h:
 ../Core/Inc/main.h:
 ../Drivers/STM32H7xx_HAL_Driver/Inc/stm32h7xx_hal.h:
@@ -112,4 +111,3 @@ D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_vers
 D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/Core/Src/phri/himpel.h:
 ../Core/Inc/config.h:
 D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/Core/Src/phri/modbus_lg.h:
-../Core/Src/phri/25LC256.h:

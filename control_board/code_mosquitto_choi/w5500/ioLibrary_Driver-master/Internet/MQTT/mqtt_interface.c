@@ -62,11 +62,32 @@ void MilliTimer_Handler(void) {
     MilliTimer++;
 }
 
-/*
-    @brief Timer Initialize
-    @param  timer : pointer to a Timer structure
-           that contains the configuration information for the Timer.
-*/
+/* ============================================================================
+ * ★★★ 2026-08-11 핵심 버그 수정: MilliTimer → HAL_GetTick() 직접 사용 ★★★
+ *
+ * [발견된 문제] 아래 Timer 함수들은 전역변수 MilliTimer를 기준 시각으로
+ * 사용했는데, 이 MilliTimer는 MQTT 태스크가 아니라 **다른 태스크**
+ * (app.c의 StartAppTimeTask)가 매 루프마다 `MilliTimer = HAL_GetTick();`
+ * 로 갱신해주는 값이었습니다. 그런데 StartAppTimeTask는 같은 루프 안에서
+ * W5500_DhcpTick()(DHCP 리스 갱신)도 호출합니다.
+ *
+ * 즉, DHCP 갱신 처리가 단 몇 초라도 오래 걸리면 → StartAppTimeTask가 그
+ * 다음 루프로 못 넘어가서 MilliTimer 갱신이 멈추고 → MQTT 태스크의
+ * TimerIsExpired()/TimerLeftMS()가 "정지된 시각"을 기준으로 계산되어
+ * **사실상 타임아웃이 걸리지 않는 상태**가 됩니다. MQTTConnect()의
+ * CONNACK 대기, MQTTYield 등 MQTT 쪽 모든 타임아웃이 다른 태스크의
+ * 상태에 종속되어 있던 셈입니다. 현장에서 보고된 "재접속 시도 로그가
+ * 한 줄만 찍히고 51~90분 동안 조용히 있다가 갑자기 복구되는" 현상과
+ * 정확히 일치하는 메커니즘입니다.
+ *
+ * [조치] MilliTimer 의존을 완전히 제거하고 HAL_GetTick()을 직접
+ * 사용합니다. HAL_GetTick()은 SysTick 인터럽트(하드웨어 타이머)로
+ * 갱신되므로 어떤 태스크가 무엇을 하고 있든 항상 정확하게 흐릅니다.
+ * 이제 MQTT의 모든 타임아웃은 다른 태스크의 상태와 완전히 독립적으로
+ * 정확히 동작합니다. (MilliTimer 변수/MilliTimer_Handler()는 혹시
+ * 다른 곳에서 참조할까봐 남겨두지만, Timer 함수들은 더 이상 사용하지
+ * 않습니다.)
+ * ============================================================================ */
 void TimerInit(Timer* timer) {
     timer->end_time = 0;
 }
@@ -77,7 +98,7 @@ void TimerInit(Timer* timer) {
            that contains the configuration information for the Timer.
 */
 char TimerIsExpired(Timer* timer) {
-    long left = timer->end_time - MilliTimer;
+    long left = timer->end_time - (long)HAL_GetTick();
     return (left < 0);
 }
 
@@ -88,7 +109,7 @@ char TimerIsExpired(Timer* timer) {
            timeout : setting timeout millisecond.
 */
 void TimerCountdownMS(Timer* timer, unsigned int timeout) {
-    timer->end_time = MilliTimer + timeout;
+    timer->end_time = (long)HAL_GetTick() + timeout;
 }
 
 /*
@@ -98,7 +119,7 @@ void TimerCountdownMS(Timer* timer, unsigned int timeout) {
            timeout : setting timeout millisecond.
 */
 void TimerCountdown(Timer* timer, unsigned int timeout) {
-    timer->end_time = MilliTimer + (timeout * 1000);
+    timer->end_time = (long)HAL_GetTick() + (timeout * 1000);
 }
 
 /*
@@ -107,7 +128,7 @@ void TimerCountdown(Timer* timer, unsigned int timeout) {
            that contains the configuration information for the Timer.
 */
 int TimerLeftMS(Timer* timer) {
-    long left = timer->end_time - MilliTimer;
+    long left = timer->end_time - (long)HAL_GetTick();
     return (left < 0) ? 0 : left;
 }
 

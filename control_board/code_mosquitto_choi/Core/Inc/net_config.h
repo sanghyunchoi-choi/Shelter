@@ -29,17 +29,15 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-/* net_config.h 구조체 수정본 */
 typedef struct {
-    uint8_t  net_mode;     // 0 = STATIC, 1 = DHCP
-    uint8_t  ip[4];
-    uint8_t  sn[4];
-    uint8_t  gw[4];
-    uint8_t  dns[4];
-    uint8_t  broker_ip[4];
-    uint16_t broker_port;
-} __attribute__((packed)) NetRuntimeConfig; // ★ [필수] 1바이트 단위 패킹 지정을 통해 패딩 오염 원천 차단
-
+    uint8_t  net_mode;     /* 0 = STATIC 고정 IP, 1 = DHCP 자동 할당 */
+    uint8_t  ip[4];        /* 제어 보드 고정 IP */
+    uint8_t  sn[4];        /* 서브넷 마스크 */
+    uint8_t  gw[4];        /* 게이트웨이 */
+    uint8_t  dns[4];       /* DNS 서버 */
+    uint8_t  broker_ip[4]; /* 접속할 MQTT 브로커 PC IP */
+    uint16_t broker_port;  /* MQTT 브로커 포트 번호 (예: 1883) */
+} __attribute__((packed)) NetRuntimeConfig;
 
 extern NetRuntimeConfig g_net_cfg;
 
@@ -56,8 +54,12 @@ bool NetConfig_Load(void);
  *  재부팅되었으면 SHELTER_NET_ROLLBACK_MAX_FAILS회를 넘길 때 backup으로 복구. */
 void NetConfig_CheckRollback(void);
 
-/** 웹서버/MQTT로부터 새 설정을 받았을 때 호출. 현재 값을 backup으로 옮기고
- *  새 값을 "미확정" 상태로 저장. 호출 후 재부팅해야 적용됨. */
+/** 웹서버/MQTT로부터 새 네트워크 또는 브로커 설정을 받았을 때 호출.
+ *  현재 설정을 backup으로 이동시키고 새 설정을 "미확정(pending)" 상태로
+ *  저장합니다. 호출 후 재부팅해야 적용됩니다.
+ *  @return true = EEPROM에 실제로 저장됨(재부팅해서 적용해도 됨),
+ *          false = EEPROM 미응답으로 저장 실패(재부팅해도 의미 없음 — 호출부는
+ *          재부팅하지 말고 실패를 알려야 함) */
 void NetConfig_SaveAndApply(const NetRuntimeConfig *new_cfg);
 
 /** MQTT 최초 연결 성공 시 1회 호출. pending 상태였다면 확정(commit) 처리. */

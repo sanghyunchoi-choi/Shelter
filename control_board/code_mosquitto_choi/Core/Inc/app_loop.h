@@ -22,5 +22,6 @@ void RLY_All_Reset(void);
 void RLY_SetButtonControl(bool is_entrance, bool enable);
 
 void SCAN_External_Inputs(void);
+void SCAN_External_Inputs_switch8(void);
 void SCAN_Switch_Configuration(void);
 #endif /* INC_APP_LOOP_H_ */

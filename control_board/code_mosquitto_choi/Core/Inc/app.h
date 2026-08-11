@@ -37,6 +37,8 @@
 typedef struct {
     bool p4, p5, p6, p7;                    // 현재 입력 상태 (1=신호 있음)
     uint32_t cnt4, cnt5, cnt6, cnt7;         // 입력 신호 누적 카운트 (상승엣지 기준)
+
+    bool sw1,sw2,sw3,sw4,sw5,sw6,sw7,sw8;
     uint8_t sw_val;
 } InputStatus;
 

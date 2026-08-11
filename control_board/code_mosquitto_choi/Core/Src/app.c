@@ -36,7 +36,7 @@
 #define FAN_TEMP_RANGE  (FAN_TEMP_MAX - FAN_TEMP_MIN)
 
 extern void getAPStatusAll(APData* dest);
-extern bool W5500_ApplyNetwork(void);
+
 /* ======================================================================
  [1. 통합 장치 상태 관리 (Global Status Snapshot)]
  ====================================================================== */
@@ -335,28 +335,20 @@ void StartMQTTTask(void *argument)
 		/* [Step 4] TCP 레이어 연결
 		   ★ 2026-08-10: 브로커 IP/포트를 config.h 고정 매크로 대신
 		   EEPROM(g_net_cfg)에서 읽음 — 웹서버에서 브로커 IP 변경 가능. */
-#if 0
+#if 1
 		uint8_t broker_ip[] = SHELTER_MQTT_BROKER_IP;
-		uint16_t broker_port = SHELTER_MQTT_BROKER_PORT;
+		uint16_t broker_port =SHELTER_MQTT_BROKER_PORT;
+		printf("[MQTT] Connecting to %u.%u.%u.%u:%d...\r\n",
+				broker_ip[0], broker_ip[1], broker_ip[2], broker_ip[3],
+				SHELTER_MQTT_BROKER_PORT);
 #else
-        // 런타임 변수 참조 모드 (#else 환경)
-        uint8_t broker_ip[4];
-        broker_ip[0] = g_net_cfg.broker_ip[0];
-        broker_ip[1] = g_net_cfg.broker_ip[1];
-        broker_ip[2] = g_net_cfg.broker_ip[2];
-        broker_ip[3] = g_net_cfg.broker_ip[3];
-
-        uint16_t broker_port = g_net_cfg.broker_port;
-
-        // 주소값이 아닌 실제 데이터가 찍히도록 포맷팅 보장
-        printf("[MQTT] Connecting to 런타임 변수 -> %u.%u.%u.%u:%u...\r\n",
-                (unsigned int)broker_ip[0],
-                (unsigned int)broker_ip[1],
-                (unsigned int)broker_ip[2],
-                (unsigned int)broker_ip[3],
-                (unsigned int)broker_port);
+		uint8_t broker_ip[4];
+		memcpy(broker_ip, g_net_cfg.broker_ip, 4);
+		uint16_t broker_port = g_net_cfg.broker_port;
+		printf("[MQTT] Connecting to %u.%u.%u.%u:%d...\r\n",
+				broker_ip[0], broker_ip[1], broker_ip[2], broker_ip[3],
+				broker_port);
 #endif
-
 		NewNetwork(&n, MQTT_SOCKET_NUM);
 		if (ConnectNetwork(&n, broker_ip, broker_port) != SOCK_OK) {
 		    if (disconnect_tick == 0) disconnect_tick = HAL_GetTick();
@@ -505,6 +497,17 @@ void StartAppTimeTask(void *argument)
 	uint32_t last_sec_tick = HAL_GetTick();
 	is_time_synced = true;
 
+	/* ★ 2026-08-10 추가: 내부(STM32) RTC를 DS3231에서 30분마다 재동기화.
+	   기존에는 부팅 시 1회(Boot_Sync_Internal_RTC_From_DS3231)만 동기화하고
+	   이후로는 NTP가 24시간에 1번 갱신할 때까지 내부 RTC 클럭에만 의존했음.
+	   현장에서 "리포트 로그 시각이 실제 시각보다 계속 늦게 찍힌다"는
+	   드리프트가 보고되었는데, 최근 발견된 크리스탈 GND 미접지 이슈가
+	   내부 RTC의 기준 클럭(LSE)에도 영향을 줬을 가능성이 있습니다.
+	   하드웨어 수정 후에도 혹시 남을 수 있는 잔여 드리프트에 대한
+	   방어적 조치로, DS3231(별도의 정확한 I2C RTC)로 더 자주 보정합니다. */
+	static uint32_t last_ds3231_sync_tick = 0;
+#define DS3231_RESYNC_INTERVAL_MS  (30UL * 60UL * 1000UL)  // 30분
+
 	for (;;) {
 		MilliTimer = HAL_GetTick();
 		uint32_t now = HAL_GetTick();
@@ -513,10 +516,14 @@ void StartAppTimeTask(void *argument)
 		if (now - last_sec_tick >= 1000) {
 			last_sec_tick = now;
 
-			// 2. 중복 조건문 싹 지우고 가차 없이 바로 틱 실행!
-			#if SHELTER_NET_USE_DHCP
+			// 2. DHCP/STATIC 어느 쪽으로 빌드되어도 항상 안전하게 호출.
+			//    (w5500_ctrl.c: DHCP 빌드=실제 리스 갱신, STATIC 빌드=빈 no-op)
 			W5500_DhcpTick();
-			#endif
+
+			if (now - last_ds3231_sync_tick >= DS3231_RESYNC_INTERVAL_MS) {
+				last_ds3231_sync_tick = now;
+				Boot_Sync_Internal_RTC_From_DS3231();
+			}
 		}
 
 		osDelay(100);
@@ -553,7 +560,6 @@ void StartAppSensorTask(void *argument)
 	CWTTH03S_Modbus_Init();
 	pub_done_dust = pub_done_th_in = pub_done_th_out = pub_done_relay = false;
 	pub_done_input = false;   // v2.0: 외부 입력 4채널 최초 보고 트리거
-
 	/* [2. MQTT 연결 대기] */
 	while (!is_mqtt_connected) osDelay(500);
 
@@ -661,6 +667,8 @@ void StartAppSensorTask(void *argument)
 				osMutexRelease(mqtt_mutex_id);
 			}
 		}
+
+		SCAN_External_Inputs_switch8();	// 슬라이드 스위치8번의 입력을 받아서 내부 메모리 지우고 reboot
 
 		if (now - last_in_recv_tick >= 3000) {
 			last_in_recv_tick = now;

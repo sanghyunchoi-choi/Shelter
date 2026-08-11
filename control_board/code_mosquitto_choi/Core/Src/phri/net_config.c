@@ -1,37 +1,95 @@
 /**
  * @file net_config.c
- * @brief STATIC IP 필드 및 브로커 정보 EEPROM 관리 코어엔진 (하드웨어 페이지 정렬 완료 버전)
+ * @brief 제어보드 IP & MQTT 브로커 설정 STM32H7 내장 플래시 저장/복구 코어 매니저
  */
 #include "net_config.h"
 #include "config.h"
-#include "25LC256.h"
 #include <string.h>
 #include <stdio.h>
 
-extern SPI_HandleTypeDef hspi6;
+#define NET_CFG_MAGIC           0x53484C33u   /* "SHL3" 매직코드 */
 
-#define NET_CFG_MAGIC      0x53484C33u   /* "SHL3" 매직코드 */
+/* STM32H743ZIT6 펌웨어 충돌 없는 안전 구역 (Bank 2, 마지막 Sector 7) 고정 */
+#define FLASH_USER_START_ADDR   0x081E0000u
+#define FLASH_SECTOR_NUM        7
+#define FLASH_BANK_NUM          FLASH_BANK_2
 
-/*
- * [★하드웨어 페이지 격리] 25LC256의 64바이트 물리 페이지 경계를 절대 침범하지 않도록
- * 모든 독립 데이터를 64바이트(1페이지) 배수로 완전히 분리하여 알박기합니다.
- */
-#define OFF_MAGIC          0     /* Page 0 (0~63) */
-#define OFF_CURRENT        64    /* Page 1 (64~127): NetRuntimeConfig 구조체 */
-#define OFF_BACKUP         128   /* Page 2 (128~191): NetRuntimeConfig 백업 */
-#define OFF_PENDING_FLAG   192   /* Page 3 (192~255): 플래그 변수 구역 */
-#define OFF_FAIL_COUNT     193
-#define OFF_CHECKSUM       194   /* 체크섬도 Page 3 내부 정렬 구역에 배치 */
+/* 하드웨어 32바이트 정렬 배치 맵 정의 (데이터 꼬임 전면 차단) */
+#define OFF_MAGIC               0
+#define OFF_CURRENT             32
+#define OFF_BACKUP              64
+#define OFF_PENDING_FLAG        96
+#define OFF_FAIL_COUNT          128
 
 NetRuntimeConfig g_net_cfg;
 volatile bool g_net_cfg_pending = false;
 
-static uint16_t calc_checksum(const NetRuntimeConfig *c)
+/* 내장 플래시 섹터 완전 초기화(지우기) */
+/* 내장 플래시 섹터 완전 초기화 (STM32H7 전용 Ex_Erase 규격 정렬) */
+static bool flash_erase_sector(void)
 {
-    const uint8_t *p = (const uint8_t *)c;
-    uint16_t sum = 0;
-    for (size_t i = 0; i < sizeof(*c); i++) sum += p[i];
-    return sum;
+    FLASH_EraseInitTypeDef EraseInitStruct;
+    uint32_t SectorError = 0;
+
+    EraseInitStruct.TypeErase    = FLASH_TYPEERASE_SECTORS;
+    EraseInitStruct.Banks        = FLASH_BANK_NUM;
+    EraseInitStruct.Sector       = FLASH_SECTOR_NUM;
+    EraseInitStruct.NbSectors    = 1;
+    EraseInitStruct.VoltageRange = FLASH_VOLTAGE_RANGE_3; // 3.3V 보드 전위 레벨
+
+    if (HAL_FLASH_Unlock() != HAL_OK) return false;
+
+    // H7 플래시 컨트롤러 캐시 에러 플래그 전면 비우기
+    __HAL_FLASH_CLEAR_FLAG(FLASH_FLAG_ALL_ERRORS_BANK2);
+
+    // ★ [링커 에러 해결 픽스] H7 정식 명칭인 HAL_FLASHEx_Erase API로 바인딩 변경!!
+    if (HAL_FLASHEx_Erase(&EraseInitStruct, &SectorError) != HAL_OK) {
+        HAL_FLASH_Lock();
+        return false;
+    }
+
+    HAL_FLASH_Lock();
+    return true;
+}
+
+
+/* 플래시 영역 램 버퍼 스트리밍 복사 */
+static void flash_read_bytes(uint32_t offset, void *buf, uint32_t len)
+{
+    uint32_t src = FLASH_USER_START_ADDR + offset;
+    memcpy(buf, (const void*)src, len);
+}
+
+/* STM32H7 256비트(32바이트) 단위 안전 덮어쓰기 라이팅 엔진 */
+static bool flash_write_bytes(uint32_t offset, const void *buf, uint32_t len)
+{
+    uint8_t page_buf[256];
+
+    // 1. 현재 섹터에 들어있는 상태 전체를 안전하게 램 버퍼로 복사
+    flash_read_bytes(0, page_buf, 256);
+
+    // 2. 수정을 원하는 주소 오프셋 구역만 램 상에서 정밀 갱신
+    memcpy(&page_buf[offset], buf, len);
+
+    // 3. 플래시 물리 특성 반영을 위해 타겟 섹터 깨끗이 밀어내기
+    if (!flash_erase_sector()) return false;
+
+    if (HAL_FLASH_Unlock() != HAL_OK) return false;
+    __HAL_FLASH_CLEAR_FLAG(FLASH_FLAG_ALL_ERRORS_BANK2);
+
+    // 4. 32바이트(Flash Word) 배수로 연속 내장 각인 실행
+    uint32_t dest_addr = FLASH_USER_START_ADDR;
+    uint32_t src_addr  = (uint32_t)page_buf;
+
+    for (int i = 0; i < 256; i += 32) {
+        if (HAL_FLASH_Program(FLASH_TYPEPROGRAM_FLASHWORD, dest_addr + i, src_addr + i) != HAL_OK) {
+            HAL_FLASH_Lock();
+            return false;
+        }
+    }
+
+    HAL_FLASH_Lock();
+    return true;
 }
 
 static void load_defaults(NetRuntimeConfig *c)
@@ -44,7 +102,7 @@ static void load_defaults(NetRuntimeConfig *c)
 
     memset(c, 0, sizeof(*c));
 
-    c->net_mode = 1; // 최초 가동 기본값은 DHCP(1)
+    c->net_mode = 1; /* 최초 공장 출하 시 기본값은 무조건 1 (DHCP 모드 기동) */
 
     for(int i = 0; i < 4; i++) {
         c->ip[i]        = ip_init[i];
@@ -56,28 +114,14 @@ static void load_defaults(NetRuntimeConfig *c)
     c->broker_port = SHELTER_MQTT_BROKER_PORT;
 }
 
-static bool eeprom_read(uint16_t off, void *buf, uint16_t len)
-{
-    return EEPROM_SPI_ReadBuffer((uint8_t *)buf,
-            SHELTER_NET_EEPROM_BASE_ADDR + off, len) == EEPROM_STATUS_COMPLETE;
-}
-
 static void write_current(const NetRuntimeConfig *c)
 {
-    // 복잡한 체크섬 연산 및 쓰기를 배제하고 구조체만 확실하게 페이지 저장합니다.
-    EEPROM_SPI_WritePage((uint8_t*)c, OFF_CURRENT, sizeof(*c));
+    flash_write_bytes(OFF_CURRENT, c, sizeof(*c));
 }
 
 static bool read_current(NetRuntimeConfig *out)
 {
-    NetRuntimeConfig tmp;
-
-    // 체크섬 주소 번지 미스매치 위험을 없애기 위해, 순수하게 구조체 읽기 성공 여부만 확인합니다.
-    if (!eeprom_read(OFF_CURRENT, &tmp, sizeof(tmp))) {
-        return false;
-    }
-
-    *out = tmp;
+    flash_read_bytes(OFF_CURRENT, out, sizeof(*out));
     return true;
 }
 
@@ -87,41 +131,33 @@ void NetConfig_CheckRollback(void)
     uint8_t  pending = 0;
     uint8_t  fail_cnt = 0;
 
-    EEPROM_SPI_INIT(&hspi6);
+    flash_read_bytes(OFF_MAGIC, &magic, sizeof(magic));
+    if (magic != NET_CFG_MAGIC) return;
 
-    if (!eeprom_read(OFF_MAGIC, &magic, sizeof(magic)) || magic != NET_CFG_MAGIC) {
-        return;
-    }
+    flash_read_bytes(OFF_PENDING_FLAG, &pending, sizeof(pending));
+    if (pending == 0) return;
 
-    if (!eeprom_read(OFF_PENDING_FLAG, &pending, sizeof(pending)) || pending == 0) {
-        return;
-    }
-
-    if (!eeprom_read(OFF_FAIL_COUNT, &fail_cnt, sizeof(fail_cnt))) {
-        fail_cnt = 0;
-    }
-
+    flash_read_bytes(OFF_FAIL_COUNT, &fail_cnt, sizeof(fail_cnt));
     fail_cnt++;
     printf("[NETCFG] Pending config detected. Boot attempt: %u/%u\r\n",
            (unsigned int)fail_cnt, (unsigned int)SHELTER_NET_ROLLBACK_MAX_FAILS);
 
     if (fail_cnt >= SHELTER_NET_ROLLBACK_MAX_FAILS) {
         NetRuntimeConfig backup;
-        if (eeprom_read(OFF_BACKUP, &backup, sizeof(backup))) {
-            printf("[NETCFG] !!! Rollback triggered !!! Restoring backup config.\r\n");
+        flash_read_bytes(OFF_BACKUP, &backup, sizeof(backup));
+        printf("[NETCFG] !!! Rollback triggered !!! Restoring backup config.\r\n");
 
-            write_current(&backup);
+        write_current(&backup);
 
-            pending = 0;
-            fail_cnt = 0;
+        pending = 0;
+        fail_cnt = 0;
 
-            EEPROM_SPI_WritePage(&pending, OFF_PENDING_FLAG, sizeof(pending));
-            EEPROM_SPI_WritePage(&fail_cnt, OFF_FAIL_COUNT, sizeof(fail_cnt));
-            return;
-        }
+        flash_write_bytes(OFF_PENDING_FLAG, &pending, sizeof(pending));
+        flash_write_bytes(OFF_FAIL_COUNT, &fail_cnt, sizeof(fail_cnt));
+        return;
     }
 
-    EEPROM_SPI_WritePage(&fail_cnt, OFF_FAIL_COUNT, sizeof(fail_cnt));
+    flash_write_bytes(OFF_FAIL_COUNT, &fail_cnt, sizeof(fail_cnt));
 }
 
 bool NetConfig_Load(void)
@@ -130,27 +166,25 @@ bool NetConfig_Load(void)
     uint32_t magic = 0;
     uint8_t pending_flag = 0;
 
-    EEPROM_SPI_INIT(&hspi6);
+    flash_read_bytes(OFF_MAGIC, &magic, sizeof(magic));
 
-    if (eeprom_read(OFF_MAGIC, &magic, sizeof(magic)) &&
-        magic == NET_CFG_MAGIC && read_current(&cfg)) {
-
+    if (magic == NET_CFG_MAGIC) {
+        read_current(&cfg);
         g_net_cfg = cfg;
 
-        if (eeprom_read(OFF_PENDING_FLAG, &pending_flag, sizeof(pending_flag))) {
-            g_net_cfg_pending = (pending_flag != 0);
-        } else {
-            g_net_cfg_pending = false;
-        }
+        flash_read_bytes(OFF_PENDING_FLAG, &pending_flag, sizeof(pending_flag));
+        g_net_cfg_pending = (pending_flag != 0);
 
-        printf("[NETCFG] Loaded from EEPROM (mode=%u, broker=%u.%u.%u.%u:%u, pending=%d)\r\n",
+        // 보드 고정 IP 주소 및 연동 브로커 PC 정보 통합 로드 출력 보완 완료
+        printf("[NETCFG] Loaded from Internal Flash (mode=%u, board_ip=%u.%u.%u.%u, broker=%u.%u.%u.%u:%u, pending=%d)\r\n",
                g_net_cfg.net_mode,
-               (unsigned int)g_net_cfg.broker_ip[0], (unsigned int)g_net_cfg.broker_ip[1],
-               (unsigned int)g_net_cfg.broker_ip[2], (unsigned int)g_net_cfg.broker_ip[3],
-               (unsigned int)g_net_cfg.broker_port, g_net_cfg_pending);
+               g_net_cfg.ip[0], g_net_cfg.ip[1], g_net_cfg.ip[2], g_net_cfg.ip[3],
+               g_net_cfg.broker_ip[0], g_net_cfg.broker_ip[1], g_net_cfg.broker_ip[2], g_net_cfg.broker_ip[3],
+               g_net_cfg.broker_port, g_net_cfg_pending);
         return true;
     }
 
+    /* 내장 플래시 최초 각인 포매팅 (config.h 베이스라인 이식) */
     load_defaults(&g_net_cfg);
     g_net_cfg_pending = false;
 
@@ -158,16 +192,17 @@ bool NetConfig_Load(void)
     uint8_t pending = 0;
     uint8_t fail_cnt = 0;
 
-    if (EEPROM_SPI_WritePage((uint8_t*)&magic, OFF_MAGIC, sizeof(magic)) == EEPROM_STATUS_COMPLETE) {
-        write_current(&g_net_cfg);
-        EEPROM_SPI_WritePage((uint8_t*)&g_net_cfg, OFF_BACKUP, sizeof(g_net_cfg));
-        EEPROM_SPI_WritePage(&pending, OFF_PENDING_FLAG, sizeof(pending));
-        EEPROM_SPI_WritePage(&fail_cnt, OFF_FAIL_COUNT, sizeof(fail_cnt));
+    uint8_t init_block[256];
+    memset(init_block, 0xFF, sizeof(init_block));
 
-        printf("[NETCFG] EEPROM empty. Wrote compile-time defaults from config.h\r\n");
-    } else {
-        printf("[NETCFG] EEPROM not responding — using config.h compile-time defaults\r\n");
-    }
+    memcpy(&init_block[OFF_MAGIC], &magic, sizeof(magic));
+    memcpy(&init_block[OFF_CURRENT], &g_net_cfg, sizeof(g_net_cfg));
+    memcpy(&init_block[OFF_BACKUP], &g_net_cfg, sizeof(g_net_cfg));
+    memcpy(&init_block[OFF_PENDING_FLAG], &pending, sizeof(pending));
+    memcpy(&init_block[OFF_FAIL_COUNT], &fail_cnt, sizeof(fail_cnt));
+
+    flash_write_bytes(0, init_block, 256);
+    printf("[NETCFG] Internal Flash Empty. Wrote compile-time defaults to Sector 7.\r\n");
 
     return false;
 }
@@ -179,22 +214,24 @@ void NetConfig_SaveAndApply(const NetRuntimeConfig *new_cfg)
     uint8_t pending = 1;
     uint8_t fail_cnt = 0;
 
-    if (read_current(&backup_slot)) {
-        EEPROM_SPI_WritePage((uint8_t*)&backup_slot, OFF_BACKUP, sizeof(backup_slot));
-    }
+    read_current(&backup_slot);
 
-    // 완전히 격리 정렬된 오프셋 맵 규격 순차 기록
-    EEPROM_SPI_WritePage((uint8_t*)&magic, OFF_MAGIC, sizeof(magic));
-    write_current(new_cfg);
+    uint8_t save_block[256];
+    memset(save_block, 0xFF, sizeof(save_block));
 
-    EEPROM_SPI_WritePage(&pending, OFF_PENDING_FLAG, sizeof(pending));
-    EEPROM_SPI_WritePage(&fail_cnt, OFF_FAIL_COUNT, sizeof(fail_cnt));
+    memcpy(&save_block[OFF_MAGIC], &magic, sizeof(magic));
+    memcpy(&save_block[OFF_CURRENT], new_cfg, sizeof(*new_cfg));
+    memcpy(&save_block[OFF_BACKUP], &backup_slot, sizeof(backup_slot));
+    memcpy(&save_block[OFF_PENDING_FLAG], &pending, sizeof(pending));
+    memcpy(&save_block[OFF_FAIL_COUNT], &fail_cnt, sizeof(fail_cnt));
+
+    flash_write_bytes(0, save_block, 256);
     g_net_cfg_pending = true;
 
-    printf("[NETCFG] New config saved (pending). Rebooting to apply...\r\n");
+    printf("[NETCFG] New config saved to internal flash. Rebooting to apply...\r\n");
 
     HAL_Delay(500);
-    HAL_NVIC_SystemReset();
+    HAL_NVIC_SystemReset(); /* 저장 즉시 하드웨어 자동 재부팅 */
 }
 
 void NetConfig_ConfirmBoot(void)
@@ -203,10 +240,10 @@ void NetConfig_ConfirmBoot(void)
     NetRuntimeConfig cur;
 
     if (!g_net_cfg_pending) return;
-    if (!read_current(&cur)) return;
+    read_current(&cur);
 
-    EEPROM_SPI_WritePage((uint8_t*)&cur, OFF_BACKUP, sizeof(cur));
-    EEPROM_SPI_WritePage(&pending, OFF_PENDING_FLAG, sizeof(pending));
+    flash_write_bytes(OFF_BACKUP, &cur, sizeof(cur));
+    flash_write_bytes(OFF_PENDING_FLAG, &pending, sizeof(pending));
     g_net_cfg_pending = false;
-    printf("[NETCFG] Config confirmed (MQTT connected OK). Rollback timer cleared.\r\n");
+    printf("[NETCFG] Config confirmed (MQTT connected OK). Internal Flash backup synced.\r\n");
 }

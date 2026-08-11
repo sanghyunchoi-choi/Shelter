@@ -6,6 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>스마트쉘터 CMS 통합관제</title>
 <script src="/socket.io/socket.io.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
 <link href="https://googleapis.com" rel="stylesheet">
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -88,6 +89,12 @@ body { font-family: 'Noto Sans KR', sans-serif; background: var(--bg); color: va
 .sensor-chip { background: var(--bg); border-radius: 8px; padding: 10px 16px; text-align: center; min-width: 100px; }
 .sensor-chip .val { font-size: 20px; font-weight: 700; }
 .sensor-chip .lbl { font-size: 11px; color: var(--text2); margin-top: 2px; }
+/* [v2.0] 외부 입력 4채널 원형 표시등 */
+.input-chip { display: flex; flex-direction: column; align-items: center; min-width: 90px; }
+.input-circle { width: 44px; height: 44px; border-radius: 50%; background: #ffffff; border: 3px solid var(--border); transition: all .2s; box-shadow: inset 0 1px 3px rgba(0,0,0,.08); }
+.input-circle.on { background: var(--success); border-color: var(--success); box-shadow: 0 0 0 5px var(--success-light); }
+.btn-outline { padding: 7px 14px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); font-size: 12px; font-weight: 500; cursor: pointer; color: var(--text2); transition: all .15s; }
+.btn-outline:hover { background: var(--bg); color: var(--text); }
 .fan-duty { display: flex; align-items: center; gap: 12px; flex: 1; }
 .fan-duty input[type=range] { flex: 1; accent-color: var(--primary); }
 .fan-duty .duty-val { font-size: 14px; font-weight: 700; min-width: 36px; text-align: right; }
@@ -170,6 +177,7 @@ body { font-family: 'Noto Sans KR', sans-serif; background: var(--bg); color: va
  <div class="nav-item" onclick="navigate('power')">⚡ 전원 관리 / 분전반</div>
  <div class="nav-item" onclick="navigate('schedule')">📅 자동 제어 스케줄</div>
  <div class="nav-item" onclick="navigate('logs')">📟 실시간 MQTT 로그</div>
+ <div class="nav-item" onclick="navigate('netcfg')">🌐 네트워크 설정</div>
  </div>
  <div class="sidebar-footer">
  <div class="user-info">
@@ -296,6 +304,38 @@ body { font-family: 'Noto Sans KR', sans-serif; background: var(--bg); color: va
  <div class="sensor-row">
  <div class="sensor-chip"><div class="val" id="s-out-temp">—</div><div class="lbl">온도 (°C)</div></div>
  <div class="sensor-chip"><div class="val" id="s-out-humi">—</div><div class="lbl">습도 (%)</div></div>
+ </div>
+ </div>
+ <!-- ════ [v2.0 신규] 외부 입력 4채널 (PD4~PD7) 모니터링 ════ -->
+ <div class="device-card sensor-full">
+ <div class="device-card-header">
+ <div class="device-name">외부 입력 4채널 모니터링 (PD4~PD7)</div>
+ <span class="status-badge offline" id="input-badge">오프라인</span>
+ </div>
+ <div class="sensor-row" id="input-circle-row" style="justify-content:space-around; text-align:center;">
+ <div class="input-chip">
+ <div class="input-circle" id="in-circle-1"></div>
+ <div class="lbl" style="margin-top:6px;">입력 1 (PD4)</div>
+ <div class="val" id="in-count-1" style="font-size:20px;">0</div>
+ </div>
+ <div class="input-chip">
+ <div class="input-circle" id="in-circle-2"></div>
+ <div class="lbl" style="margin-top:6px;">입력 2 (PD5)</div>
+ <div class="val" id="in-count-2" style="font-size:20px;">0</div>
+ </div>
+ <div class="input-chip">
+ <div class="input-circle" id="in-circle-3"></div>
+ <div class="lbl" style="margin-top:6px;">입력 3 (PD6)</div>
+ <div class="val" id="in-count-3" style="font-size:20px;">0</div>
+ </div>
+ <div class="input-chip">
+ <div class="input-circle" id="in-circle-4"></div>
+ <div class="lbl" style="margin-top:6px;">입력 4 (PD7)</div>
+ <div class="val" id="in-count-4" style="font-size:20px;">0</div>
+ </div>
+ </div>
+ <div style="text-align:right; margin-top:10px;">
+ <button class="btn-outline" onclick="resetInputCounts()">카운트 초기화</button>
  </div>
  </div>
  </div>
@@ -478,6 +518,19 @@ body { font-family: 'Noto Sans KR', sans-serif; background: var(--bg); color: va
  </div>
  <div class="section-header" style="margin-top:24px;"><div class="section-title">8 개 채널 전체 합산 24 시간 실시간 누적 전력 사용량 현황</div></div>
  <div class="chart-container" id="power-bar-chart"></div>
+
+ <!-- [v2.0 신규] 실시간 개별 채널 + 전체 전력 라인 그래프 -->
+ <div class="section-header" style="margin-top:24px;">
+ <div class="section-title">실시간 전력 그래프 (개별 채널 + 전체)</div>
+ </div>
+ <div style="font-size:12px; color:var(--text2); margin-bottom:8px;">
+ 범례를 클릭하면 해당 채널을 그래프에서 켜고 끌 수 있습니다. "전체"는 8채널 합산입니다.
+ </div>
+ <div class="device-card" style="padding:16px;">
+ <div style="position:relative; height:320px;">
+ <canvas id="power-live-chart"></canvas>
+ </div>
+ </div>
  </div>
 
  <!-- ════ 5. 자동 제어 스케줄 ════ -->
@@ -584,6 +637,59 @@ body { font-family: 'Noto Sans KR', sans-serif; background: var(--bg); color: va
  </div>
  <div class="log-container" id="mqtt-log-board">
  <div class="log-line"><span class="log-time">[SYSTEM]</span> 관제 콘솔 파이프라인 대기 중... 패킷 인입 시 실시간 표출됩니다.</div>
+ </div>
+ </div>
+
+ <!-- ════ [v2.0 신규] 네트워크 설정 (제어보드 IP / MQTT 브로커) ════ -->
+ <div id="page-netcfg" class="page">
+ <div class="section-header"><div class="section-title">제어보드 네트워크 / MQTT 브로커 설정</div></div>
+ <div class="device-grid" style="grid-template-columns: 1fr;">
+ <div class="device-card">
+ <div class="device-card-header">
+ <div class="device-name">현재 연결 정보</div>
+ <span class="status-badge offline" id="netcfg-badge">오프라인</span>
+ </div>
+ <div class="device-data">
+ <div class="data-item"><div class="data-label">제어보드 IP</div><div class="data-value" id="netcfg-cur-ip">—</div></div>
+ <div class="data-item"><div class="data-label">모드</div><div class="data-value" id="netcfg-cur-mode">—</div></div>
+ <div class="data-item"><div class="data-label">장치 UID</div><div class="data-value" id="netcfg-cur-uid" style="font-size:12px;">—</div></div>
+ </div>
+ </div>
+
+ <div class="device-card">
+ <div class="device-card-header"><div class="device-name">STATIC IP 값 변경</div></div>
+ <p style="font-size:12px; color:var(--text2); margin-bottom:12px;">
+ DHCP/STATIC "모드" 자체는 제어보드 펌웨어에 컴파일된 값으로 고정되어 있습니다
+ (현재 모드는 위 "현재 연결 정보"에 표시됨). 여기서 바꿀 수 있는 것은
+ <b>보드가 STATIC 모드로 빌드되어 있을 때 사용할 IP값</b>입니다 — 지금 모드가
+ DHCP라면 이 값은 저장은 되지만 다음에 STATIC으로 재빌드하기 전까지는 적용되지 않습니다.<br>
+ 변경 후 저장하면 제어보드가 자동으로 재부팅되어 적용을 시도합니다.
+ 새 설정으로 MQTT 접속에 실패하면(약 60초) 안전을 위해 자동으로 이전 설정으로 복구됩니다.
+ </p>
+ <div class="device-data">
+ <div class="data-item"><div class="data-label">IP 주소</div><input id="netcfg-ip" value="192.168.0.50" placeholder="192.168.0.50" style="width:100%; border:1px solid var(--border); border-radius:6px; padding:6px 8px;"></div>
+ <div class="data-item"><div class="data-label">서브넷 마스크</div><input id="netcfg-sn" value="255.255.255.0" placeholder="255.255.255.0" style="width:100%; border:1px solid var(--border); border-radius:6px; padding:6px 8px;"></div>
+ <div class="data-item"><div class="data-label">게이트웨이</div><input id="netcfg-gw" value="192.168.0.1" placeholder="192.168.0.1" style="width:100%; border:1px solid var(--border); border-radius:6px; padding:6px 8px;"></div>
+ <div class="data-item"><div class="data-label">DNS (선택)</div><input id="netcfg-dns" value="8.8.8.8" placeholder="8.8.8.8" style="width:100%; border:1px solid var(--border); border-radius:6px; padding:6px 8px;"></div>
+ </div>
+ <div style="text-align:right; margin-top:14px;">
+ <button class="ctrl-btn primary" onclick="applyNetcfg()">저장 및 재부팅 적용</button>
+ </div>
+ </div>
+
+ <div class="device-card">
+ <div class="device-card-header"><div class="device-name">MQTT 브로커 설정 변경</div></div>
+ <p style="font-size:12px; color:var(--text2); margin-bottom:12px;">
+ 제어보드가 접속할 MQTT 브로커(이 웹서버가 구동 중인 PC)의 IP/포트입니다.
+ </p>
+ <div class="device-data">
+ <div class="data-item"><div class="data-label">브로커 IP</div><input id="netcfg-broker-ip" value="192.168.0.107" placeholder="192.168.0.107" style="width:100%; border:1px solid var(--border); border-radius:6px; padding:6px 8px;"></div>
+ <div class="data-item"><div class="data-label">브로커 포트</div><input id="netcfg-broker-port" value="1883" placeholder="1883" style="width:100%; border:1px solid var(--border); border-radius:6px; padding:6px 8px;"></div>
+ </div>
+ <div style="text-align:right; margin-top:14px;">
+ <button class="ctrl-btn primary" onclick="applyBrokerCfg()">저장 및 재부팅 적용</button>
+ </div>
+ </div>
  </div>
  </div>
 
@@ -724,6 +830,7 @@ function initSocketConnection(token) {
  socket.on('initial_state', (state) => {
  updateAll(state);
  if (state._hourlyPowerStats) renderPowerChart(state._hourlyPowerStats);
+ if (state._powerHistory) initPowerLiveChart(state._powerHistory);
  if (state._mqttLogSession) {
  const board = document.getElementById('mqtt-log-board');
  if (board) {
@@ -738,11 +845,17 @@ function initSocketConnection(token) {
  }
  });
 
+ // [v2.0 신규] 전원분배기 실시간 개별/전체 전력 샘플 — 1건씩 들어올 때마다 그래프에 추가
+ socket.on('power_sample', (sample) => {
+ appendPowerSample(sample);
+ });
+
  socket.on('device_update', ({ topic, data }) => {
  const keyMap = {
  'dev/tele/state': 'state', 'dev/tele/dust': 'dust', 'dev/tele/th_in': 'th_in',
  'dev/tele/th_out': 'th_out', 'dev/tele/ad': 'ad', 'dev/tele/fan': 'fan',
- 'dev/stat/pb': 'pb', 'dev/tele/pb': 'pb', 'dev/tele/ap': 'ap', 'dev/tele/ac': 'ac'
+ 'dev/stat/pb': 'pb', 'dev/tele/pb': 'pb', 'dev/tele/ap': 'ap', 'dev/tele/ac': 'ac',
+ 'dev/tele/input': 'input', 'dev/stat/input': 'input'
  };
  const key = keyMap[topic];
  if (key) updateDevice(key, data);
@@ -892,14 +1005,32 @@ function updateDevice(key, data) {
  const badgeMap = {
  ac: ['ac-badge', 'ctrl-ac-badge'], ap: ['ap-badge', 'ctrl-ap-badge'],
  fan: ['fan-badge', 'ctrl-fan-badge'], ad: ['ad-badge', 'ctrl-ad-badge'],
- dust: ['dust-badge'], th_in: ['th-in-badge'], th_out: ['th-out-badge'], pb: ['pb-badge']
+ dust: ['dust-badge'], th_in: ['th-in-badge'], th_out: ['th-out-badge'], pb: ['pb-badge'],
+ input: ['input-badge']
  };
  if (badgeMap[key]) badgeMap[key].forEach(id => setBadge(id, isOnline));
+
+ // [v2.0 신규] 외부 입력 4채널 — 원형 표시등(초록/흰색) + 카운트 갱신
+ // (data 형식은 server.js에서 이미 {p4,p5,p6,p7,cnt4,cnt5,cnt6,cnt7,conn}으로 정규화됨)
+ if (key === 'input') {
+ const pins = [data.p4, data.p5, data.p6, data.p7];
+ const counts = [data.cnt4, data.cnt5, data.cnt6, data.cnt7];
+ for (let i = 0; i < 4; i++) {
+ const circle = document.getElementById(`in-circle-${i + 1}`);
+ if (circle) circle.classList.toggle('on', !!pins[i]);
+ setText(`in-count-${i + 1}`, counts[i] !== undefined ? counts[i] : 0);
+ }
+ }
 
  if (key === 'state') {
  document.getElementById('dash-online').textContent = isOnline ? '연결됨' : '오프라인';
  const uid = data.uid || data.ip;
  document.getElementById('dash-online-sub').textContent = uid ? ('UID: ' + uid) : '정상 관제 중';
+ // [v2.0 신규] 네트워크 설정 화면 — 현재 연결 정보 표시
+ setBadge('netcfg-badge', isOnline);
+ setText('netcfg-cur-ip', data.ip);
+ setText('netcfg-cur-mode', data.mode);
+ setText('netcfg-cur-uid', data.uid);
  }
  if (key === 'ac') {
  setText('ac-temp', data.temp); setText('ac-curr', data.curr); setText('ac-spd', data.spd);
@@ -1065,7 +1196,7 @@ function setText(id, val) {
 function updateAll(state) {
  if (!state) return;
  if (state._hourlyPowerStats) window._currentStats = state._hourlyPowerStats;
- ['ac', 'ap', 'fan', 'ad', 'dust', 'th_in', 'th_out', 'pb', 'state'].forEach(key => {
+ ['ac', 'ap', 'fan', 'ad', 'dust', 'th_in', 'th_out', 'pb', 'state', 'input'].forEach(key => {
  if (state[key]) updateDevice(key, state[key]);
  });
 }
@@ -1076,6 +1207,53 @@ function sendCmd(device, cmd) {
  } else {
  showToast('중앙 제어 관제 서버와 웹소켓 세션이 연결되어 있지 않습니다.', 'error');
  }
+}
+
+// [v2.0 신규] 외부 입력 4채널 카운트 초기화
+function resetInputCounts() {
+ sendCmd('input', { reset_count: 1 });
+ showToast('입력 카운트 초기화 명령을 전송했습니다.', 'success');
+}
+
+function parseIpParts(str, label) {
+ const parts = (str || '').trim().split('.').map(n => parseInt(n, 10));
+ if (parts.length !== 4 || parts.some(n => isNaN(n) || n < 0 || n > 255)) {
+ showToast(`${label} 형식이 올바르지 않습니다. 예: 192.168.0.50`, 'error');
+ return null;
+ }
+ return parts;
+}
+
+// [v2.0 신규] STATIC IP값 저장 — dev/cmnd/dev {"set_net":{"ip":...,"sn":...,"gw":...}}
+// (DHCP/STATIC "모드" 자체는 컴파일타임 고정이라 여기서 바꾸지 않음)
+function applyNetcfg() {
+ const ip = parseIpParts(document.getElementById('netcfg-ip').value, 'IP 주소');
+ const sn = parseIpParts(document.getElementById('netcfg-sn').value, '서브넷 마스크');
+ const gw = parseIpParts(document.getElementById('netcfg-gw').value, '게이트웨이');
+ if (!ip || !sn || !gw) return;
+ const dnsRaw = document.getElementById('netcfg-dns').value;
+ const payload = { ip, sn, gw };
+ if (dnsRaw && dnsRaw.trim()) {
+ const dns = parseIpParts(dnsRaw, 'DNS');
+ if (!dns) return;
+ payload.dns = dns;
+ }
+ if (!confirm('STATIC IP 값을 저장하고 제어보드를 재부팅할까요? (보드가 지금 DHCP로 빌드되어 있다면 이 값은 저장만 되고 즉시 적용되지는 않습니다) 잘못된 값을 입력해도 60초 내 접속 실패 시 자동으로 이전 설정으로 복구됩니다.')) return;
+ sendCmd('dev', { set_net: payload });
+ showToast('STATIC IP 저장 명령 전송. 제어보드가 재부팅됩니다...', 'success');
+}
+
+// [v2.0 신규] MQTT 브로커 IP/포트 저장 — dev/cmnd/dev {"set_broker":...}
+function applyBrokerCfg() {
+ const ip = parseIpParts(document.getElementById('netcfg-broker-ip').value, '브로커 IP');
+ if (!ip) return;
+ const portRaw = document.getElementById('netcfg-broker-port').value;
+ const port = parseInt(portRaw, 10);
+ const payload = { ip };
+ if (portRaw && !isNaN(port) && port > 0 && port <= 65535) payload.port = port;
+ if (!confirm('브로커 설정을 저장하고 제어보드를 재부팅할까요? 잘못된 값을 입력하면 접속이 끊길 수 있으나, 60초 내 접속 실패 시 자동으로 이전 설정으로 복구됩니다.')) return;
+ sendCmd('dev', { set_broker: payload });
+ showToast('브로커 설정 저장 명령 전송. 제어보드가 재부팅됩니다...', 'success');
 }
 
 function refreshAll() {
@@ -1117,7 +1295,8 @@ function runFullApAcTest() {
 const pageTitles = {
  dashboard: '대시보드 종합관제', sensors: '센서 모니터링 현황',
  control: '스마트 장비 원격제어', power: '전원 관리 / 분전반',
- schedule: '자동 제어 스케줄', logs: '실시간 MQTT 로그'
+ schedule: '자동 제어 스케줄', logs: '실시간 MQTT 로그',
+ netcfg: '네트워크 / MQTT 브로커 설정'
 };
 
 function navigate(page) {
@@ -1126,6 +1305,11 @@ function navigate(page) {
  const tPage = document.getElementById(`page-${page}`); if (tPage) tPage.classList.add('active');
  const tNav = document.querySelector(`[onclick="navigate('${page}')"]`); if (tNav) tNav.classList.add('active');
  const pTitle = document.getElementById('page-title'); if (pTitle) pTitle.textContent = pageTitles[page] || '시스템';
+ // [v2.0] Chart.js는 숨겨진(display:none) 캔버스에서는 크기를 0으로 잡으므로,
+ // 전력 페이지가 실제로 보여지는 순간에 맞춰 다시 그려줌
+ if (page === 'power' && window._powerChart) {
+ requestAnimationFrame(() => window._powerChart.resize());
+ }
 }
 
 function updateClock() {

@@ -7,6 +7,10 @@
 
 #define DEFAULT_DOOR_TIME    10000  // 기본 10초 (ms 단위)
 
+// 전역 또는 상단에 선언될 이전 핀 상태 비교용 변수 (로그 출력 제어용)
+static bool last_sw1 = false, last_sw2 = false, last_sw3 = false, last_sw4 = false;
+static bool last_sw5 = false, last_sw6 = false, last_sw7 = false, last_sw8 = false;
+
 
 /* --- 외부 전역 변수 참조 --- */
 extern unsigned long MilliTimer;
@@ -201,6 +205,64 @@ void SCAN_External_Inputs(void) {
 }
 
 
+void SCAN_External_Inputs_switch8(void) {
+	// 1. [Active Low 정석 판독] 핀 레벨이 RESET(0V)일 때가 누름(true/1)입니다.
+	bool c_sw1 = (HAL_GPIO_ReadPin(GPIOD, GPIO_PIN_8)  == GPIO_PIN_RESET);
+	bool c_sw2 = (HAL_GPIO_ReadPin(GPIOD, GPIO_PIN_9)  == GPIO_PIN_RESET); // 깔끔하게 한 줄로 교정 완료!
+	bool c_sw3 = (HAL_GPIO_ReadPin(GPIOD, GPIO_PIN_10) == GPIO_PIN_RESET);
+	bool c_sw4 = (HAL_GPIO_ReadPin(GPIOD, GPIO_PIN_11) == GPIO_PIN_RESET);
+	bool c_sw5 = (HAL_GPIO_ReadPin(GPIOD, GPIO_PIN_12) == GPIO_PIN_RESET);
+	bool c_sw6 = (HAL_GPIO_ReadPin(GPIOD, GPIO_PIN_13) == GPIO_PIN_RESET);
+	bool c_sw7 = (HAL_GPIO_ReadPin(GPIOD, GPIO_PIN_14) == GPIO_PIN_RESET);
+	bool c_sw8 = (HAL_GPIO_ReadPin(GPIOD, GPIO_PIN_15) == GPIO_PIN_RESET);
+
+	// 2. 전역 구조체 sw1 ~ sw8 변수명에 실시간 상태 업데이트
+	dev_status.in_stat.sw1 = c_sw1;
+	dev_status.in_stat.sw2 = c_sw2;
+	dev_status.in_stat.sw3 = c_sw3;
+	dev_status.in_stat.sw4 = c_sw4;
+	dev_status.in_stat.sw5 = c_sw5;
+	dev_status.in_stat.sw6 = c_sw6;
+	dev_status.in_stat.sw7 = c_sw7;
+	dev_status.in_stat.sw8 = c_sw8;
+
+	// 3. 변이 감시 및 시리얼 로그 출력
+	if (c_sw1 != last_sw1) { printf("[SWITCH] SW1 (PD8) State Changed ➔ %s\r\n", c_sw1 ? "ON" : "OFF"); last_sw1 = c_sw1; }
+	if (c_sw2 != last_sw2) { printf("[SWITCH] SW2 (PD9) State Changed ➔ %s\r\n", c_sw2 ? "ON" : "OFF"); last_sw2 = c_sw2; }
+	if (c_sw3 != last_sw3) { printf("[SWITCH] SW3 (PD10) State Changed ➔ %s\r\n", c_sw3 ? "ON" : "OFF"); last_sw3 = c_sw3; }
+	if (c_sw4 != last_sw4) { printf("[SWITCH] SW4 (PD11) State Changed ➔ %s\r\n", c_sw4 ? "ON" : "OFF"); last_sw4 = c_sw4; }
+	if (c_sw5 != last_sw5) { printf("[SWITCH] SW5 (PD12) State Changed ➔ %s\r\n", c_sw5 ? "ON" : "OFF"); last_sw5 = c_sw5; }
+	if (c_sw6 != last_sw6) { printf("[SWITCH] SW6 (PD13) State Changed ➔ %s\r\n", c_sw6 ? "ON" : "OFF"); last_sw6 = c_sw6; }
+	if (c_sw7 != last_sw7) { printf("[SWITCH] SW7 (PD14) State Changed ➔ %s\r\n", c_sw7 ? "ON" : "OFF"); last_sw7 = c_sw7; }
+
+	if (c_sw8 != last_sw8) {
+		printf("[SWITCH] SW8 (PD15) State Changed ➔ %s\r\n", c_sw8 ? "ON" : "OFF");
+
+		/*
+		 * [★무한 리셋 절대 방어 가드]
+		 * 이전 루프에서 분명히 꺼져있다가(last_sw8 == false)
+		 * 이번 루프에서 처음 딱 켜지는(c_sw8 == true) '상승 엣지 순간'에만 단 1번 실행!
+		 * 버튼을 계속 누른 채로 리셋되어 다시 켜져도 조건문이 차단되어 무한 리셋에 절대 안 빠짐.
+		 */
+		if (c_sw8 && !last_sw8) {
+			printf("[FACTORY-RESET] SW8 하드웨어 복구 버튼 감지! 설정을 DHCP 모드로 밀고 재부팅합니다.\r\n");
+
+			// 램 상에서 네트워크 모드를 DHCP(1)로 원상 복구 스위칭
+			NetRuntimeConfig reset_cfg = g_net_cfg;
+			reset_cfg.net_mode = 1;
+
+			// 비교 변수를 미리 세팅하여 이중 트리거 예방 처리 후 내장 플래시 영구 각인 및 재부팅 위임
+			last_sw8 = c_sw8;
+			NetConfig_SaveAndApply(&reset_cfg);
+			return;
+		}
+
+		last_sw8 = c_sw8;
+	}
+}
+
+
+
 /**
  * @brief 8단 스위치 조합 스캔 (누적 합산 방식)
  */
@@ -221,6 +283,3 @@ void SCAN_Switch_Configuration(void) {
 		last_sw_val = current_sw_val;
 	}
 }
-
-
-
