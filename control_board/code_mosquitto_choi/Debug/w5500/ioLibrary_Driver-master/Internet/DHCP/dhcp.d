@@ -36,28 +36,26 @@ w5500/ioLibrary_Driver-master/Internet/DHCP/dhcp.o: \
  ../Drivers/STM32H7xx_HAL_Driver/Inc/stm32h7xx_hal_tim_ex.h \
  ../Drivers/STM32H7xx_HAL_Driver/Inc/stm32h7xx_hal_uart.h \
  ../Drivers/STM32H7xx_HAL_Driver/Inc/stm32h7xx_hal_uart_ex.h \
- D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2/cmsis_os2.h \
+ ../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2/cmsis_os2.h \
  ../Core/Inc/app.h ../Core/Inc/main.h ../Core/Inc/config.h \
  ../Core/Inc/net_config.h \
- D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/w5500/ioLibrary_Driver-master/Internet/MQTT/MQTTClient.h \
- D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/w5500/ioLibrary_Driver-master/Internet/MQTT/./MQTTPacket/src/MQTTPacket.h \
- D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/w5500/ioLibrary_Driver-master/Internet/MQTT/./MQTTPacket/src/MQTTConnect.h \
- D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/w5500/ioLibrary_Driver-master/Internet/MQTT/./MQTTPacket/src/MQTTPublish.h \
- D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/w5500/ioLibrary_Driver-master/Internet/MQTT/./MQTTPacket/src/MQTTSubscribe.h \
- D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/w5500/ioLibrary_Driver-master/Internet/MQTT/./MQTTPacket/src/MQTTUnsubscribe.h \
- D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/w5500/ioLibrary_Driver-master/Internet/MQTT/./MQTTPacket/src/MQTTFormat.h \
- D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/w5500/ioLibrary_Driver-master/Internet/MQTT/./MQTTPacket/src/StackTrace.h \
- D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/w5500/ioLibrary_Driver-master/Internet/MQTT/./MQTTPacket/src/MQTTPacket.h \
- D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/w5500/ioLibrary_Driver-master/Internet/MQTT/mqtt_interface.h \
- D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/Core/Src/phri/HCSD.h \
- ../Core/Inc/mqtt_handler.h \
- D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/Core/Src/phri/himpel.h \
- ../Core/Inc/config.h \
- D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/Core/Src/phri/modbus_lg.h \
- D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/w5500/ioLibrary_Driver-master/Ethernet/socket.h \
- D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/w5500/ioLibrary_Driver-master/Ethernet/wizchip_conf.h \
- D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/w5500/ioLibrary_Driver-master/Ethernet/W5500/w5500.h \
- D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/w5500/ioLibrary_Driver-master/Ethernet/wizchip_conf.h \
+ ../w5500/ioLibrary_Driver-master/Internet/MQTT/MQTTClient.h \
+ ../w5500/ioLibrary_Driver-master/Internet/MQTT/./MQTTPacket/src/MQTTPacket.h \
+ ../w5500/ioLibrary_Driver-master/Internet/MQTT/./MQTTPacket/src/MQTTConnect.h \
+ ../w5500/ioLibrary_Driver-master/Internet/MQTT/./MQTTPacket/src/MQTTPublish.h \
+ ../w5500/ioLibrary_Driver-master/Internet/MQTT/./MQTTPacket/src/MQTTSubscribe.h \
+ ../w5500/ioLibrary_Driver-master/Internet/MQTT/./MQTTPacket/src/MQTTUnsubscribe.h \
+ ../w5500/ioLibrary_Driver-master/Internet/MQTT/./MQTTPacket/src/MQTTFormat.h \
+ ../w5500/ioLibrary_Driver-master/Internet/MQTT/./MQTTPacket/src/StackTrace.h \
+ ../w5500/ioLibrary_Driver-master/Internet/MQTT/./MQTTPacket/src/MQTTPacket.h \
+ ../w5500/ioLibrary_Driver-master/Internet/MQTT/mqtt_interface.h \
+ ../Core/Src/phri/HCSD.h ../Core/Inc/mqtt_handler.h \
+ ../Core/Src/phri/himpel.h ../Core/Inc/config.h \
+ ../Core/Src/phri/modbus_lg.h \
+ ../w5500/ioLibrary_Driver-master/Ethernet/socket.h \
+ ../w5500/ioLibrary_Driver-master/Ethernet/wizchip_conf.h \
+ ../w5500/ioLibrary_Driver-master/Ethernet/W5500/w5500.h \
+ ../w5500/ioLibrary_Driver-master/Ethernet/wizchip_conf.h \
  ../w5500/ioLibrary_Driver-master/Internet/DHCP/dhcp.h
 ../Core/Inc/main.h:
 ../Drivers/STM32H7xx_HAL_Driver/Inc/stm32h7xx_hal.h:
@@ -96,28 +94,28 @@ w5500/ioLibrary_Driver-master/Internet/DHCP/dhcp.o: \
 ../Drivers/STM32H7xx_HAL_Driver/Inc/stm32h7xx_hal_tim_ex.h:
 ../Drivers/STM32H7xx_HAL_Driver/Inc/stm32h7xx_hal_uart.h:
 ../Drivers/STM32H7xx_HAL_Driver/Inc/stm32h7xx_hal_uart_ex.h:
-D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2/cmsis_os2.h:
+../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2/cmsis_os2.h:
 ../Core/Inc/app.h:
 ../Core/Inc/main.h:
 ../Core/Inc/config.h:
 ../Core/Inc/net_config.h:
-D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/w5500/ioLibrary_Driver-master/Internet/MQTT/MQTTClient.h:
-D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/w5500/ioLibrary_Driver-master/Internet/MQTT/./MQTTPacket/src/MQTTPacket.h:
-D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/w5500/ioLibrary_Driver-master/Internet/MQTT/./MQTTPacket/src/MQTTConnect.h:
-D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/w5500/ioLibrary_Driver-master/Internet/MQTT/./MQTTPacket/src/MQTTPublish.h:
-D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/w5500/ioLibrary_Driver-master/Internet/MQTT/./MQTTPacket/src/MQTTSubscribe.h:
-D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/w5500/ioLibrary_Driver-master/Internet/MQTT/./MQTTPacket/src/MQTTUnsubscribe.h:
-D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/w5500/ioLibrary_Driver-master/Internet/MQTT/./MQTTPacket/src/MQTTFormat.h:
-D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/w5500/ioLibrary_Driver-master/Internet/MQTT/./MQTTPacket/src/StackTrace.h:
-D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/w5500/ioLibrary_Driver-master/Internet/MQTT/./MQTTPacket/src/MQTTPacket.h:
-D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/w5500/ioLibrary_Driver-master/Internet/MQTT/mqtt_interface.h:
-D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/Core/Src/phri/HCSD.h:
+../w5500/ioLibrary_Driver-master/Internet/MQTT/MQTTClient.h:
+../w5500/ioLibrary_Driver-master/Internet/MQTT/./MQTTPacket/src/MQTTPacket.h:
+../w5500/ioLibrary_Driver-master/Internet/MQTT/./MQTTPacket/src/MQTTConnect.h:
+../w5500/ioLibrary_Driver-master/Internet/MQTT/./MQTTPacket/src/MQTTPublish.h:
+../w5500/ioLibrary_Driver-master/Internet/MQTT/./MQTTPacket/src/MQTTSubscribe.h:
+../w5500/ioLibrary_Driver-master/Internet/MQTT/./MQTTPacket/src/MQTTUnsubscribe.h:
+../w5500/ioLibrary_Driver-master/Internet/MQTT/./MQTTPacket/src/MQTTFormat.h:
+../w5500/ioLibrary_Driver-master/Internet/MQTT/./MQTTPacket/src/StackTrace.h:
+../w5500/ioLibrary_Driver-master/Internet/MQTT/./MQTTPacket/src/MQTTPacket.h:
+../w5500/ioLibrary_Driver-master/Internet/MQTT/mqtt_interface.h:
+../Core/Src/phri/HCSD.h:
 ../Core/Inc/mqtt_handler.h:
-D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/Core/Src/phri/himpel.h:
+../Core/Src/phri/himpel.h:
 ../Core/Inc/config.h:
-D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/Core/Src/phri/modbus_lg.h:
-D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/w5500/ioLibrary_Driver-master/Ethernet/socket.h:
-D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/w5500/ioLibrary_Driver-master/Ethernet/wizchip_conf.h:
-D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/w5500/ioLibrary_Driver-master/Ethernet/W5500/w5500.h:
-D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/w5500/ioLibrary_Driver-master/Ethernet/wizchip_conf.h:
+../Core/Src/phri/modbus_lg.h:
+../w5500/ioLibrary_Driver-master/Ethernet/socket.h:
+../w5500/ioLibrary_Driver-master/Ethernet/wizchip_conf.h:
+../w5500/ioLibrary_Driver-master/Ethernet/W5500/w5500.h:
+../w5500/ioLibrary_Driver-master/Ethernet/wizchip_conf.h:
 ../w5500/ioLibrary_Driver-master/Internet/DHCP/dhcp.h:

@@ -20,13 +20,14 @@
 #define ADDR_INDOOR_TEMP        0x0001      // Input 30002 (실내 온도)
 #define HOLDING_READ_COUNT      3           // 40001~40003 일괄 조회
 
-/* --- [3] 제어 파라미터 정의 --- */
+/* --- [3] 제어 파라미터 정의 (실내기 1대 — LG Modbus 중앙제어 #1) --- */
 typedef enum {
     AC_MODE_COOL = 0, AC_MODE_DRY = 1, AC_MODE_FAN = 2, AC_MODE_AUTO = 3, AC_MODE_HEAT = 4
 } LG_AC_MODE;
 
 typedef enum {
-    AC_WIND_LOW = 1, AC_WIND_MID = 2, AC_WIND_HIGH = 3, AC_WIND_AUTO = 4, AC_WIND_ULTRA = 7
+    AC_WIND_LOW = 1, AC_WIND_MID = 2, AC_WIND_HIGH = 3, AC_WIND_AUTO = 4,
+    AC_WIND_ULTRA_LOW = 5, AC_WIND_POWER = 6
 } LG_AC_WIND;
 
 /* --- [4] 상태 머신 및 함수 코드 --- */
@@ -49,8 +50,8 @@ void getACStatus(void); // 전체 상태 폴링
 
 // Setter API (제어용) — 0=Modbus 성공, -1=실패
 int setACPower(bool on);
-int setACMode(uint8_t mode);
+int setACMode(uint8_t mode);     /* 0=COOL .. 4=HEAT (LG 40001) */
 int setACSpeed(uint8_t speed);
 int setACTemperature(uint16_t temp_x10);
-int setACWindSpeed(uint8_t speed);
+int setACWindSpeed(uint8_t speed); /* LG 40002: 1~6 (5=미약, 6=파워) */
 #endif

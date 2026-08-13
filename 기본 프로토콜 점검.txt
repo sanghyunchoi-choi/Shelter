@@ -1,0 +1,103 @@
+
+
+1. 30분에 한번씩 RTC 체크 
+
+2. 전원 보드의 데이터는 10초에 한번씩 업데이트 -> 서버쪽에서 시간 잘 계산해서 그래프가 필요(일일 사용량 체크)
+
+3. 10분에 한번씩 전체 데이터 개별 보고 
+
+4. 변경 사항이 있을 때 즉각 보고 -> 입력 부분 (외부 4채널과 스위치 8개 상태 관리)
+ 외부 4채널 -> 외부 입력 처리(자동문 연 횟수 등)
+ 스위치 8 -> 제어 보드 IP 및 브로커 IP 관리 
+
+
+스케쥴 확인
+[MQTT RX] Topic: dev/cmnd/ac,{"pwr":0}
+
+[MQTT RX] Topic: dev/cmnd/ap,{"pwr":0}
+
+[MQTT RX] Topic: dev/cmnd/ad,{"set_ad":"000000000000000"}
+[RX] Sequential Control Complete.
+
+
+uart로 ip 변경 
+#include "net_config.h"
+#include <stdio.h>
+#include <string.h>
+
+#define UART_RX_BUF_SIZE  128
+
+static char uart_rx_buf[UART_RX_BUF_SIZE];
+static uint16_t uart_rx_idx = 0;
+
+/**
+ * @brief UART 한 글자 수신 인터럽트 콜백 함수 발생 시 호출할 콘솔 파서
+ * @note 큐브MX가 생성한 HAL_UART_RxCpltCallback 내부나 주기적 수신 루프에 매칭하세요.
+ */
+void UART_Console_Process_Char(char rx_char)
+{
+	// 엔터 키 기호(\r 또는 \n)가 들어오면 문장 조립을 마감하고 명령어를 해석합니다.
+	if (rx_char == '\r' || rx_char == '\n') {
+		if (uart_rx_idx > 0) {
+			uart_rx_buf[uart_rx_idx] = '\0'; // 문자열 마감 처리
+			
+			printf("\r\n[UART-CMD] 수신된 명령어: %s\r\n", uart_rx_buf);
+
+			// --- [명령어 1] 고정 IP 수동 설정 구역 ---
+			// 입력 포맷 예시: SET_NET=192.168.0.55,255.255.255.0,192.168.0.1
+			if (strncmp(uart_rx_buf, "SET_NET=", 8) == 0) {
+				int ip[4], sn[4], gw[4];
+				char *data_ptr = &uart_rx_buf[8];
+
+				int parsed = sscanf(data_ptr, "%d.%d.%d.%d,%d.%d.%d.%d,%d.%d.%d.%d",
+									&ip[0], &ip[1], &ip[2], &ip[3],
+									&sn[0], &sn[1], &sn[2], &sn[3],
+									&gw[0], &gw[1], &gw[2], &gw[3]);
+
+				if (parsed == 12) {
+					NetRuntimeConfig new_cfg = g_net_cfg;
+					for (int i = 0; i < 4; i++) {
+						new_cfg.ip[i] = (uint8_t)ip[i];
+						new_cfg.sn[i] = (uint8_t)sn[i];
+						new_cfg.gw[i] = (uint8_t)gw[i];
+					}
+					new_cfg.net_mode = 0; // STATIC 모드로 기어 강제 전환
+					
+					printf("[UART-CMD] 고정 IP 파싱 성공! 새 설정을 플래시에 각인하고 재부팅합니다.\r\n");
+					HAL_Delay(200);
+					
+					// 검증 완료된 영구 저장 및 재부팅 함수 가동
+					NetConfig_SaveAndApply(&new_cfg); 
+				} else {
+					printf("[UART-CMD] [에러] 포맷이 틀렸습니다. (예: SET_NET=192.168.0.51,255.255.255.0,192.168.0.1)\r\n");
+				}
+			}
+			// --- [명령어 2] DHCP 모드 강제 복귀 구역 ---
+			// 입력 포맷: SET_DHCP
+			else if (strcmp(uart_rx_buf, "SET_DHCP") == 0) {
+				NetRuntimeConfig new_cfg = g_net_cfg;
+				new_cfg.net_mode = 1; // DHCP 자동 할당 모드로 기어 전환
+				
+				printf("[UART-CMD] DHCP 초기화 명령 수신! 플래시 영역을 포맷하고 재부팅합니다.\r\n");
+				HAL_Delay(200);
+				
+				NetConfig_SaveAndApply(&new_cfg);
+			}
+			else {
+				printf("[UART-CMD] 알 수 없는 명령입니다. (사용 가능 명령: SET_NET=..., SET_DHCP)\r\n");
+			}
+
+			// 명령어 처리가 끝났으므로 버퍼 인덱스를 초기화합니다.
+			uart_rx_idx = 0;
+		}
+	} 
+	// 일반 문자열이 들어오는 동안에는 버퍼에 차곡차곡 쌓아둡니다.
+	else {
+		if (uart_rx_idx < (UART_RX_BUF_SIZE - 1)) {
+			// 컴퓨터 터미널 창에 사용자가 타이핑하는 글자가 눈에 보이도록 에코(Echo) 출력
+			HAL_UART_Transmit(&huart3, (uint8_t *)&rx_char, 1, 10); 
+			
+			uart_rx_buf[uart_rx_idx++] = rx_char;
+		}
+	}
+}

@@ -14,12 +14,18 @@ services:
 
   shelter-web:
     build: .
+    image: shelter-web-local:2.0
     container_name: shelter-web-local
     ports:
       - "3000:3000"
     environment:
       - PORT=3000
       - MQTT_BROKER=mqtt://mosquitto:1883
+      # Docker 내부 IP(172.x)가 아닌, 호스트 PC의 실제 LAN IP — install.bat 이 .env 에 자동 기록
+      - SERVER_LAN_IP=${SERVER_LAN_IP}
+    env_file:
+      - path: .env
+        required: false
     depends_on:
       - mosquitto
     restart: always

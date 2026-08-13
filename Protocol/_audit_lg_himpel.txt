@@ -1,0 +1,59 @@
+﻿FILE: ?섑꽣 ?꾨줈?좎퐳 ?뺤쓽.xlsx
+ SHEET: ?섑꽣 ?λ퉬 ?꾨줈?좎퐳 洹쒓꺽??
+  ?대? ??  dev/tele/fan {"mode":"MANUAL", "duty":50,"conn":1} {"fan",0,"conn":0} dev/stat/fan  {"mode":"MANUAL", "duty":50,"conn":1,"result":1} {"fan",0,"conn":0,"result":1} dev/cmnd/fan {"set_fan",{"mode
+  怨듦린泥?젙湲?dev/tele/ap {"pwr":1,"mode":"AUTO","spd":3,"uv":1,"co2":450,
+"pm25":15,"pm10": 20,"pm1_0":10,"temp":23.5,
+"humi":45,"filter":100,"conn":1} {"ap":0,"conn":0} dev/stat/ap {"pwr":1,"mode":"AUTO","s
+  ?먯뼱而?LG) dev/tele/ac {"pwr":1, "mode":"COOL","temp":24,"curr":26, "spd":3,"err":0,"conn":1} {"ac":0,"conn":0} dev/stat/ac {"pwr":1, "mode":"COOL","temp":24,"curr":26, "spd":3,"err":0
+"conn":1,"result":
+  紐⑤뱺 ?쇱꽌 ?곗씠??媛?몄삤湲?dev/stat/dev
+dev/tele/th_in
+dev/tele/th_out
+dev/tele/dust
+dev/tele/ad
+dev/tele/fan
+dev/tele/ac
+dev/tele/pb
+dev/tele/ap dev/stat/dev {"device":"ALL_DATA","conn":1,"result":1}
+dev/tele/th
+ SHEET: 李멸퀬 ?ы빆
+FILE: ?섑꽣_MQTT_?꾨줈?좎퐳_洹쒓꺽??xlsx
+ SHEET: ?뱥 媛쒖슂
+ SHEET: ?뱻 ?꾨줈?좎퐳 ?뺤쓽
+  ?대? ??tele: dev/tele/fan
+stat: dev/stat/fan
+cmnd: dev/cmnd/fan {"mode":"MANUAL",
+"duty":50,"conn":1} {"fan":0,"conn":0} {"mode":"MANUAL","duty":50,
+"conn":1,"result":1} ??AUTO 紐⑤뱶:
+   {"set_fan":{"mode"
+  짠 5  怨듦린泥?젙湲?(Air Purifier ??Himpel)
+  怨듦린泥?젙湲?tele: dev/tele/ap
+stat: dev/stat/ap
+cmnd: dev/cmnd/ap {"pwr":1,"mode":"AUTO","spd":3,
+"uv":1,"co2":450,
+"pm25":15,"pm10":20,"pm1_0":10,
+"temp":23.5,"humi":45,
+"filter":100,"conn":1} {"ap":0,"con
+  짠 6  ?먯뼱而?(Air Conditioner ??LG)
+  ?먯뼱而?
+(LG) tele: dev/tele/ac
+stat: dev/stat/ac
+cmnd: dev/cmnd/ac {"pwr":1,"mode":"COOL",
+"temp":24,"curr":26.0,
+"spd":3,"err":0,"conn":1} {"ac":0,"conn":0} (tele ?숈씪 + "result":1)
+
+?ㅽ뙣:
+{"ac":0,"conn":0,"
+ SHEET: ???숈옉 洹쒖튃
+ SHEET: ?뱰 ?꾨뱶 ?덊띁?곗뒪
+  ??mode string AUTO/MANUAL ?댁쟾 紐⑤뱶 AUTO: ?⑤룄 湲곕컲 ?먮룞
+  怨듦린泥?젙湲?pwr int 0 / 1 ?꾩썝 ?곹깭
+  怨듦린泥?젙湲?spd int 1~4 ?띿냽 ?④퀎
+  怨듦린泥?젙湲?uv int 0 / 1 UV ?닿퇏 ON/OFF
+  怨듦린泥?젙湲?co2 int ppm CO2 ?띾룄
+  怨듦린泥?젙湲?filter int 0~100 (%) ?꾪꽣 ?붿뿬 ?섎챸 filter_reset 紐낅졊?쇰줈 珥덇린??
+  ?먯뼱而?mode string COOL/HEAT/FAN/DRY ?댁쟾 紐⑤뱶
+  ?먯뼱而?temp int/float 16~30 째C ?ㅼ젙 ?⑤룄
+  ?먯뼱而?curr float 째C ?꾩옱 ?ㅻ궡 ?⑤룄 (?먯뼱而?痢≪젙)
+  ?먯뼱而?spd int 1~4 ?띿냽 ?④퀎
+  ?먯뼱而?err int ?먮윭肄붾뱶 ?먮윭 肄붾뱶 0 = ?뺤긽

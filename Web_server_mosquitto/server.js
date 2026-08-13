@@ -2,11 +2,69 @@ const express = require('express');
 const http = require('http'); 
 const { Server } = require('socket.io'); 
 const mqtt = require('mqtt'); 
+const fs = require('fs');
+const os = require('os');
 const path = require('path'); 
 
 const PORT = process.env.PORT || 3000; 
 const MQTT_BROKER = process.env.MQTT_BROKER || 'mqtt://localhost:1883'; 
 const DEVICE_TIMEOUT_MS = 5 * 60 * 1000; 
+
+function isVirtualInterface(name) {
+ const n = (name || '').toLowerCase();
+ return /docker|veth|br-|vmware|virtualbox|vboxnet|hyper-v|vethernet|wsl|loopback|npcap|tap|tun|bluetooth|wireguard|zerotier|tailscale|hamachi|singbox|clash|meta|default switch|nat|vether/i.test(n);
+}
+
+function isLikelyVirtualIp(ip) {
+ const p = ip.split('.').map(Number);
+ if (p[0] === 127) return true;
+ if (p[0] === 169 && p[1] === 254) return true;
+ if (p[0] === 172 && p[1] >= 16 && p[1] <= 31) return true;
+ if (p[0] === 192 && p[1] === 168 && p[2] === 56) return true;
+ return false;
+}
+
+function scoreLanCandidate(ip, ifaceName) {
+ let score = 0;
+ const n = (ifaceName || '').toLowerCase();
+ if (ip.startsWith('192.168.')) score += 100;
+ else if (ip.startsWith('10.')) score += 40;
+ else score += 10;
+ if (/wi-?fi|wlan|wireless|무선/i.test(ifaceName || '')) score += 30;
+ if (/ethernet|이더넷|lan|local area/i.test(ifaceName || '') && !/virtual|hyper|vmware|vbox/i.test(n)) score += 25;
+ if (/virtual|hyper|vmware|vbox|docker|wsl|vether/i.test(n)) score -= 200;
+ return score;
+}
+
+function getLocalServerIp() {
+ if (process.env.SERVER_LAN_IP) return process.env.SERVER_LAN_IP.trim();
+
+ const candidates = [];
+ for (const [name, addrs] of Object.entries(os.networkInterfaces())) {
+  if (isVirtualInterface(name)) continue;
+  for (const net of addrs || []) {
+   const family = net.family;
+   if (family !== 'IPv4' && family !== 4) continue;
+   if (net.internal) continue;
+   if (isLikelyVirtualIp(net.address)) continue;
+   candidates.push({ ip: net.address, score: scoreLanCandidate(net.address, name), name });
+  }
+ }
+ candidates.sort((a, b) => b.score - a.score);
+ if (candidates.length) {
+  console.log(`[SERVER] LAN IP 자동 감지: ${candidates[0].ip} (${candidates[0].name})`);
+  return candidates[0].ip;
+ }
+
+ const inDocker = fs.existsSync('/.dockerenv') || process.env.DOCKER === 'true';
+ if (inDocker) {
+  console.warn('[SERVER] Docker 컨테이너 내부 실행 — 컨테이너 IP(172.x)는 제어보드용이 아닙니다.');
+  console.warn('[SERVER] docker-compose.yml 또는 .env 에 SERVER_LAN_IP=호스트PC_LAN_IP 를 설정하세요. (예: 192.168.0.107)');
+ }
+ return process.env.HOST_LAN_IP || '127.0.0.1';
+}
+
+const SERVER_LAN_IP = getLocalServerIp();
 
 const TOPICS = { 
  TELE_STATE: 'dev/tele/state', TELE_DUST: 'dev/tele/dust', 
@@ -44,6 +102,14 @@ let hourlyPowerStats = Array(24).fill(0);
 // PB tele(10초 주기)가 올 때마다 1개씩 추가, 최대 360개(1시간) 유지
 const POWER_HISTORY_MAX = 360;
 let powerHistory = [];
+// 1분 단위 합산 전력 (약 10초 샘플 6건 → 분당 평균 합산 W)
+const POWER_MINUTE_MAX = 120;
+let powerMinuteHistory = [];
+let powerMinuteBucket = { minuteKey: null, sum: 0, count: 0 };
+let lastOfflineMinuteKey = null;
+let lastPbTeleAt = 0;
+let lastPbDataValid = false;
+const PB_TELE_STALE_MS = 35000;
 let mqttLogSession = []; 
 let globalScheduleConfig = { 
  morningHour: 7, morningMin: 0, 
@@ -59,19 +125,26 @@ const deviceState = {
  th_in: { temp: 0, humi: 0, conn: 0 }, 
  th_out: { temp: 0, humi: 0, conn: 0 }, 
  ad: { relays: Array(15).fill(0), conn: 0 }, 
- fan: { mode: 'AUTO', duty: 0, conn: 0 }, 
- pb: { current_b_id: 1, channels: Array(8).fill(0).map((_,i)=>({b_id:1, ch:i+1, sw:0, w:0, c:0.0, v:220})), conn: 0 }, 
+ fan: { mode: 'AUTO', duty: 0, rpm: 0, conn: 0 }, 
+ pb: { current_b_id: 0, channels: Array(8).fill(0).map((_,i)=>({b_id:0, ch:i+1, sw:0, w:0, c:0.0, v:220})), conn: 0 }, 
  ap: { pwr: 0, mode: 'AUTO', spd: 0, uv: 0, co2: 0, pm25: 0, pm10: 0, pm1_0: 0, temp: 0, temp_out: 0, humi: 0, tvoc: 0, filter: 100, conn: 0 }, 
  ac: { pwr: 0, mode: 'COOL', temp: 24, curr: 0, spd: 1, err: 0, conn: 0 },
  // [v2.0 신규] 외부 입력 4채널 (PD4~PD7)
  input: { p4: 0, p5: 0, p6: 0, p7: 0, cnt4: 0, cnt5: 0, cnt6: 0, cnt7: 0, conn: 0 }
 }; 
 
-let deviceTimeoutTimer = null; 
+let deviceTimeoutTimer = null;
+function normalizeConn(payload, fallback = 0) {
+ if (payload && payload.conn !== undefined) {
+  return payload.conn === 1 || payload.conn === true ? 1 : 0;
+ }
+ return fallback;
+}
 function resetDeviceTimeout() {
  if (deviceTimeoutTimer) clearTimeout(deviceTimeoutTimer);
- Object.keys(deviceState).forEach(k => { deviceState[k].conn = 1; });
+ /* 메인보드 MQTT 생존만 갱신 — 하위 장치 conn 은 각 tele/stat payload 값만 사용 */
  deviceState.state.status = 'ONLINE';
+ deviceState.state.conn = 1;
  deviceTimeoutTimer = setTimeout(() => { setAllOffline(); }, DEVICE_TIMEOUT_MS);
 }
 
@@ -96,14 +169,26 @@ const TELE_KEY_MAP = {
 
 const STAT_KEY_MAP = {
  [TOPICS.STAT_AC]: 'ac', [TOPICS.STAT_AP]: 'ap', [TOPICS.STAT_FAN]: 'fan',
- [TOPICS.STAT_INPUT]: 'input'
+ [TOPICS.STAT_INPUT]: 'input', [TOPICS.STAT_AD]: 'ad'
 };
 
 const TELE_TOPIC_BY_KEY = {
  state: TOPICS.TELE_STATE, dust: TOPICS.TELE_DUST, th_in: TOPICS.TELE_TH_IN,
  th_out: TOPICS.TELE_TH_OUT, ad: TOPICS.TELE_AD, fan: TOPICS.TELE_FAN,
  pb: TOPICS.TELE_PB, ap: TOPICS.TELE_AP, ac: TOPICS.TELE_AC, input: TOPICS.TELE_INPUT
-}; 
+};
+
+function publishRefreshPolls() {
+ const activeBid = deviceState.pb.current_b_id;
+ mqttClient.publish(TOPICS.CMD_AC, JSON.stringify({ get_ac: 'state' }), { qos: 1 });
+ mqttClient.publish(TOPICS.CMD_AP, JSON.stringify({ get_ap: 'state' }), { qos: 1 });
+ mqttClient.publish(TOPICS.CMD_FAN, JSON.stringify({ get_fan: 'state' }), { qos: 1 });
+ mqttClient.publish(TOPICS.CMD_AD, JSON.stringify({ get_ad: 'state' }), { qos: 1 });
+ mqttClient.publish(TOPICS.CMD_INPUT, JSON.stringify({ get_input: 'state' }), { qos: 1 });
+ if (isPbCmdReady()) {
+  mqttClient.publish(TOPICS.CMD_PB, JSON.stringify({ b_id: activeBid, get_pb: 'state' }), { qos: 1 });
+ }
+}
 
 const mqttOptions = { 
  clientId: `shelter-core-server-${Date.now()}`, 
@@ -139,6 +224,90 @@ function normalizeInputPayload(payload) {
  return payload;
 }
 
+function getMinuteKey(date) {
+ const d = date || new Date();
+ const kst = new Date(d.toLocaleString('en-US', { timeZone: 'Asia/Seoul' }));
+ return `${kst.getFullYear()}-${kst.getMonth()}-${kst.getDate()}-${kst.getHours()}-${kst.getMinutes()}`;
+}
+
+function getKstHour(date) {
+ const d = date || new Date();
+ return new Date(d.toLocaleString('en-US', { timeZone: 'Asia/Seoul' })).getHours();
+}
+
+function emitPowerMinutePoint(minuteKey, total, samples, offline) {
+ const point = {
+  t: Date.now(),
+  minuteKey,
+  total: Math.round((total || 0) * 10) / 10,
+  samples: samples || 0,
+  offline: !!offline
+ };
+ powerMinuteHistory.push(point);
+ if (powerMinuteHistory.length > POWER_MINUTE_MAX) powerMinuteHistory.shift();
+ io.emit('power_minute', point);
+ return point;
+}
+
+function emitZeroPowerSample(offline) {
+ const sample = {
+  t: Date.now(),
+  ch: Array(8).fill(0),
+  total: 0,
+  offline: !!offline
+ };
+ powerHistory.push(sample);
+ if (powerHistory.length > POWER_HISTORY_MAX) powerHistory.shift();
+ io.emit('power_sample', sample);
+ return sample;
+}
+
+function finalizePowerMinuteBucket(forceKey) {
+ const avg = powerMinuteBucket.count ? (powerMinuteBucket.sum / powerMinuteBucket.count) : 0;
+ return {
+  t: Date.now(),
+  minuteKey: forceKey || powerMinuteBucket.minuteKey,
+  total: Math.round(avg * 10) / 10,
+  samples: powerMinuteBucket.count
+ };
+}
+
+function isPbGraphOnline() {
+ return lastPbDataValid && lastPbTeleAt > 0 && (Date.now() - lastPbTeleAt < PB_TELE_STALE_MS);
+}
+
+function isPbCmdReady() {
+ return lastPbDataValid && deviceState.pb.conn === 1;
+}
+
+function ingestPbOfflineSample() {
+ emitZeroPowerSample(true);
+ ingestPowerSample(0);
+}
+
+function ensureInstantAnchorForMinute(minuteKey, total, offline) {
+ const hasAnchor = powerHistory.some(s => getMinuteKey(new Date(s.t)) === minuteKey);
+ if (!hasAnchor) emitZeroPowerSample(offline);
+ else if (total === 0 && !offline) {
+  const sample = { t: Date.now(), ch: Array(8).fill(0), total: 0, offline: false };
+  powerHistory.push(sample);
+  if (powerHistory.length > POWER_HISTORY_MAX) powerHistory.shift();
+  io.emit('power_sample', sample);
+ }
+}
+
+function ingestPowerSample(totalPowerSum) {
+ const minuteKey = getMinuteKey();
+ if (powerMinuteBucket.minuteKey === null) {
+  powerMinuteBucket.minuteKey = minuteKey;
+ } else if (powerMinuteBucket.minuteKey !== minuteKey) {
+  powerMinuteBucket = { minuteKey, sum: totalPowerSum, count: 1 };
+  return;
+ }
+ powerMinuteBucket.sum += totalPowerSum;
+ powerMinuteBucket.count += 1;
+}
+
 // ⚡ 센서 데이터 원본 인입 즉시 UI 전체 매핑 바이패스 락 해제
 mqttClient.on('message', (topic, message) => {
  const rawMsg = message.toString();
@@ -146,7 +315,6 @@ mqttClient.on('message', (topic, message) => {
  mqttLogSession.push(logItem);
  if (mqttLogSession.length > 50) mqttLogSession.shift();
  io.emit('mqtt_live_log', logItem); 
- 
  let payload;
  try { payload = JSON.parse(rawMsg); } catch { payload = { raw: rawMsg }; }
  resetDeviceTimeout();
@@ -156,9 +324,9 @@ mqttClient.on('message', (topic, message) => {
  const normalized = statKey === 'input' ? normalizeInputPayload(payload) : payload;
  if (payload.result === 1) {
  Object.assign(deviceState[statKey], normalized);
- deviceState[statKey].conn = payload.conn !== undefined ? payload.conn : 1;
+ deviceState[statKey].conn = normalizeConn(payload, deviceState[statKey].conn);
  } else {
- deviceState[statKey].conn = payload.conn !== undefined ? payload.conn : 0;
+ deviceState[statKey].conn = normalizeConn(payload, 0);
  }
  const teleTopic = TELE_TOPIC_BY_KEY[statKey];
  if (teleTopic) io.emit('device_update', { topic: teleTopic, data: { ...deviceState[statKey] } });
@@ -169,8 +337,10 @@ mqttClient.on('message', (topic, message) => {
  const key = TELE_KEY_MAP[topic];
  if (key) {
  if (key === 'pb') {
- if (payload && payload.result === 1 && Array.isArray(payload.pb)) {
- if (payload.b_id !== undefined) deviceState.pb.current_b_id = payload.b_id;
+ lastPbTeleAt = Date.now();
+ if (Array.isArray(payload.pb) && payload.pb.length > 0) {
+ const teleBid = payload.b_id !== undefined ? payload.b_id : payload.id;
+ if (teleBid !== undefined) deviceState.pb.current_b_id = teleBid;
  let totalPowerSum = 0;
  deviceState.pb.channels = payload.pb.map(item => {
  totalPowerSum += (item.w || 0.0);
@@ -183,8 +353,9 @@ mqttClient.on('message', (topic, message) => {
  v: item.v !== undefined ? item.v : 220
  };
  });
- deviceState.pb.conn = 1;
- const hour = new Date().getHours();
+ deviceState.pb.conn = normalizeConn(payload, 0);
+ lastPbDataValid = true;
+ const hour = getKstHour();
  hourlyPowerStats[hour] += (totalPowerSum / 60);
 
  // [v2.0 신규] 실시간 개별 채널 전력 그래프용 샘플 적립
@@ -193,21 +364,32 @@ mqttClient.on('message', (topic, message) => {
  const sample = {
  t: Date.now(),
  ch: deviceState.pb.channels.map(c => c.w || 0),
- total: totalPowerSum
+ total: totalPowerSum,
+ offline: false
  };
  powerHistory.push(sample);
  if (powerHistory.length > POWER_HISTORY_MAX) powerHistory.shift();
+ ingestPowerSample(totalPowerSum);
  io.emit('power_sample', sample);
- } else if (payload && payload.result === 0) {
- deviceState.pb.conn = 0;
+ } else {
+ // result:0 또는 pb 배열 없음 — 전원보드 미연결/무응답이어도 0W 그래프 유지
+ lastPbDataValid = false;
+ deviceState.pb.conn = normalizeConn(payload, 0);
+ ingestPbOfflineSample();
  }
- payload = { channels: deviceState.pb.channels, conn: deviceState.pb.conn, current_b_id: deviceState.pb.current_b_id };
+ payload = {
+ channels: deviceState.pb.channels,
+ conn: lastPbDataValid && deviceState.pb.conn ? 1 : 0,
+ current_b_id: deviceState.pb.current_b_id,
+ pb_valid: lastPbDataValid
+ };
  } else if (key === 'input') {
  // [v2.0 신규] {"in":[...],"count":[...]} → {p4..p7, cnt4..cnt7}
  payload = normalizeInputPayload(payload);
  Object.assign(deviceState.input, payload);
  } else {
  Object.assign(deviceState[key], payload);
+ deviceState[key].conn = normalizeConn(payload, deviceState[key].conn ?? 0);
  }
  payload.conn = deviceState[key].conn;
  
@@ -231,22 +413,22 @@ setInterval(() => {
  }
  
  if (currentMin !== lastProcessedMinute) {
- const activeBid = deviceState.pb.current_b_id !== undefined ? deviceState.pb.current_b_id : 1;
+ const activeBid = deviceState.pb.current_b_id;
  
  // [🌅 전체 출근 타이머 작동]
  if (currentHour === globalScheduleConfig.morningHour && currentMin === globalScheduleConfig.morningMin) {
  console.log(`\r\n[🚀 SYSTEM] 전체 출근 타이머 작동 -> 하위 개별 장치 전체 동기화!!`);
  const flg = globalScheduleConfig.morningFlags || { ac: true, ap: true, ad: true, pb: true };
  
- if (flg.ac !== false) mqttClient.publish('dev/cmnd/ac', JSON.stringify({ pwr: 1, mode: 'COOL', temp: 24 }), { qos: 1 });
- if (flg.ap !== false) mqttClient.publish('dev/cmnd/ap', JSON.stringify({ pwr: 1, mode: 'AUTO' }), { qos: 1 });
+ if (flg.ac !== false) mqttClient.publish('dev/cmnd/ac', JSON.stringify({ set_ac: { pwr: 1, mode: 'COOL', temp: 24, spd: 2 } }), { qos: 1 });
+ if (flg.ap !== false) mqttClient.publish('dev/cmnd/ap', JSON.stringify({ set_ap: { pwr: 1, mode: 'AUTO', spd: 2, uv: 0, filter_reset: 0, bypass: 0, timer: 0 } }), { qos: 1 });
  if (flg.ad !== false) mqttClient.publish('dev/cmnd/ad', JSON.stringify({ set_ad: '111111111111111' }), { qos: 1 });
- if (flg.pb !== false) mqttClient.publish('dev/cmnd/pb', JSON.stringify({ b_id: activeBid, set_pb: '11111111' }), { qos: 1 });
+ if (flg.pb !== false && isPbCmdReady()) mqttClient.publish('dev/cmnd/pb', JSON.stringify({ b_id: activeBid, set_pb: '11111111' }), { qos: 1 });
  
- if (flg.ac !== false) { Object.assign(deviceState.ac, { pwr: 1, mode: 'COOL', temp: 24 }); io.emit('device_update', { topic: TOPICS.TELE_AC, data: deviceState.ac }); }
- if (flg.ap !== false) { Object.assign(deviceState.ap, { pwr: 1, mode: 'AUTO' }); io.emit('device_update', { topic: TOPICS.TELE_AP, data: deviceState.ap }); }
+ if (flg.ac !== false) { Object.assign(deviceState.ac, { pwr: 1, mode: 'COOL', temp: 24, spd: 2 }); io.emit('device_update', { topic: TOPICS.TELE_AC, data: deviceState.ac }); }
+ if (flg.ap !== false) { Object.assign(deviceState.ap, { pwr: 1, mode: 'AUTO', spd: 2 }); io.emit('device_update', { topic: TOPICS.TELE_AP, data: deviceState.ap }); }
  if (flg.ad !== false) { deviceState.ad.relays = Array(15).fill(1); io.emit('device_update', { topic: TOPICS.TELE_AD, data: deviceState.ad }); }
- if (flg.pb !== false) { deviceState.pb.channels.forEach(ch => ch.sw = 1); io.emit('device_update', { topic: TOPICS.TELE_PB, data: { channels: deviceState.pb.channels, conn: 1, current_b_id: activeBid } }); }
+ if (flg.pb !== false) { deviceState.pb.channels.forEach(ch => ch.sw = 1); io.emit('device_update', { topic: TOPICS.TELE_PB, data: { channels: deviceState.pb.channels, conn: deviceState.pb.conn, current_b_id: activeBid, pb_valid: lastPbDataValid } }); }
 
  io.emit('mqtt_live_log', {
  time: now.toLocaleTimeString('ko-KR', { hour12: false, timeZone: 'Asia/Seoul' }),
@@ -263,12 +445,12 @@ setInterval(() => {
  if (flg.ac !== false) mqttClient.publish('dev/cmnd/ac', JSON.stringify({ pwr: 0 }), { qos: 1 });
  if (flg.ap !== false) mqttClient.publish('dev/cmnd/ap', JSON.stringify({ pwr: 0 }), { qos: 1 });
  if (flg.ad !== false) mqttClient.publish('dev/cmnd/ad', JSON.stringify({ set_ad: '000000000000000' }), { qos: 1 });
- if (flg.pb !== false) mqttClient.publish('dev/cmnd/pb', JSON.stringify({ b_id: activeBid, set_pb: '00000000' }), { qos: 1 });
+ if (flg.pb !== false && isPbCmdReady()) mqttClient.publish('dev/cmnd/pb', JSON.stringify({ b_id: activeBid, set_pb: '00000000' }), { qos: 1 });
  
  if (flg.ac !== false) { deviceState.ac.pwr = 0; io.emit('device_update', { topic: TOPICS.TELE_AC, data: deviceState.ac }); }
  if (flg.ap !== false) { deviceState.ap.pwr = 0; io.emit('device_update', { topic: TOPICS.TELE_AP, data: deviceState.ap }); }
  if (flg.ad !== false) { deviceState.ad.relays = Array(15).fill(0); io.emit('device_update', { topic: TOPICS.TELE_AD, data: deviceState.ad }); }
- if (flg.pb !== false) { deviceState.pb.channels.forEach(ch => ch.sw = 0); io.emit('device_update', { topic: TOPICS.TELE_PB, data: { channels: deviceState.pb.channels, conn: 1, current_b_id: activeBid } }); }
+ if (flg.pb !== false) { deviceState.pb.channels.forEach(ch => ch.sw = 0); io.emit('device_update', { topic: TOPICS.TELE_PB, data: { channels: deviceState.pb.channels, conn: deviceState.pb.conn, current_b_id: activeBid, pb_valid: lastPbDataValid } }); }
 
  io.emit('mqtt_live_log', {
  time: now.toLocaleTimeString('ko-KR', { hour12: false, timeZone: 'Asia/Seoul' }),
@@ -282,8 +464,32 @@ setInterval(() => {
 
 app.use(express.static(path.join(__dirname, 'public'))); 
 
+app.get('/api/server-info', (_req, res) => {
+ res.json({
+  serverIp: SERVER_LAN_IP,
+  mqttPort: 1883,
+  webPort: PORT,
+  mqttBroker: MQTT_BROKER
+ });
+});
+
 io.on('connection', (socket) => {
- socket.emit('initial_state', { ...deviceState, _hourlyPowerStats: hourlyPowerStats, _powerHistory: powerHistory, _mqttLogSession: mqttLogSession });
+ if (powerHistory.length === 0 && !isPbGraphOnline()) {
+  ingestPbOfflineSample();
+  const minuteKey = getMinuteKey();
+  if (lastOfflineMinuteKey !== minuteKey) {
+   lastOfflineMinuteKey = minuteKey;
+   emitPowerMinutePoint(minuteKey, 0, 0, true);
+  }
+ }
+ socket.emit('initial_state', {
+  ...deviceState,
+  _hourlyPowerStats: hourlyPowerStats,
+  _powerHistory: powerHistory,
+  _powerMinuteHistory: powerMinuteHistory,
+  _serverInfo: { serverIp: SERVER_LAN_IP, mqttPort: 1883 },
+  _mqttLogSession: mqttLogSession
+ });
  
  socket.on('update_schedule_config', ({ type, time, flags }) => {
  if (!time || !time.includes(':')) return;
@@ -350,17 +556,26 @@ io.on('connection', (socket) => {
  
  // 전력제어분배기(pb) 개별/일괄 스위칭 완벽 가드
  if (device === 'pb') {
+ if (!isPbCmdReady()) {
+ io.emit('cmd_result', { success: false, device: 'pb', topic: 'sent', message: 'PB tele 미수신 — b_id 미학습' });
+ return;
+ }
  const pbFinalPacket = { b_id: activeBid, ...cmd };
  mqttClient.publish(TOPICS.CMD_PB, JSON.stringify(pbFinalPacket), { qos: 1 });
- 
+
+ if (cmd.ch !== undefined && cmd.sw !== undefined) {
+ const targetCh = deviceState.pb.channels.find(c => c.ch === cmd.ch);
+ if (targetCh) targetCh.sw = parseInt(cmd.sw) === 1 ? 1 : 0;
+ io.emit('device_update', { topic: TOPICS.TELE_PB, data: { channels: deviceState.pb.channels, conn: deviceState.pb.conn, current_b_id: activeBid, pb_valid: lastPbDataValid } });
+ }
+
  if (cmd.set_pb && (cmd.set_pb.length === 8 || typeof cmd.set_pb === 'string')) {
  const bitString = String(cmd.set_pb);
  for(let i = 0; i < 8; i++) {
  const targetCh = deviceState.pb.channels.find(c => c.ch === (i + 1));
  if (targetCh) targetCh.sw = parseInt(bitString[i]) === 1 ? 1 : 0;
  }
- deviceState.pb.conn = 1;
- io.emit('device_update', { topic: TOPICS.TELE_PB, data: { channels: deviceState.pb.channels, conn: 1, current_b_id: activeBid } });
+ io.emit('device_update', { topic: TOPICS.TELE_PB, data: { channels: deviceState.pb.channels, conn: deviceState.pb.conn, current_b_id: activeBid, pb_valid: lastPbDataValid } });
  }
  return;
  }
@@ -398,16 +613,47 @@ io.on('connection', (socket) => {
  });
  
  socket.on('refresh_all', () => {
- const activeBid = deviceState.pb.current_b_id;
+ console.log('[CMS] refresh_all: ALL_DATA (dust/th/ad/fan/ac/pb/ap/input tele) + device poll');
  mqttClient.publish(TOPICS.CMD_DEV, JSON.stringify({ data: 'ALL_DATA' }), { qos: 1 });
- mqttClient.publish(TOPICS.CMD_AC, JSON.stringify({ get_ac: 'state' }), { qos: 1 });
- mqttClient.publish(TOPICS.CMD_AP, JSON.stringify({ get_ap: 'state' }), { qos: 1 });
- mqttClient.publish(TOPICS.CMD_FAN, JSON.stringify({ get_fan: 'state' }), { qos: 1 });
- mqttClient.publish(TOPICS.CMD_PB, JSON.stringify({ b_id: activeBid, get_pb: 'state' }), { qos: 1 });
- mqttClient.publish(TOPICS.CMD_AD, JSON.stringify({ get_ad: 'state' }), { qos: 1 });
+ // ALL_DATA tele(센서·입력) 처리 후 RS485 장치 stat 폴링
+ setTimeout(publishRefreshPolls, 400);
  });
-}); 
+});
+
+// 매 분 경계 확정 + 전원보드 미연결 시 1분마다 0W 하트비트 (그래프 생존 확인)
+setInterval(() => {
+ const now = new Date();
+ const minuteKey = getMinuteKey(now);
+
+ if (powerMinuteBucket.minuteKey !== null && powerMinuteBucket.minuteKey !== minuteKey) {
+  const point = finalizePowerMinuteBucket(powerMinuteBucket.minuteKey);
+  emitPowerMinutePoint(point.minuteKey, point.total, point.samples, false);
+  ensureInstantAnchorForMinute(point.minuteKey, point.total, false);
+  powerMinuteBucket = { minuteKey, sum: 0, count: 0 };
+ } else if (powerMinuteBucket.minuteKey === null) {
+  powerMinuteBucket.minuteKey = minuteKey;
+ }
+
+ if (!isPbGraphOnline() && minuteKey !== lastOfflineMinuteKey) {
+  lastOfflineMinuteKey = minuteKey;
+  emitPowerMinutePoint(minuteKey, 0, 0, true);
+  emitZeroPowerSample(true);
+ }
+}, 5000);
+
+// 서버 기동 직후 PB 미연결이면 0W 그래프 시드
+setTimeout(() => {
+ if (!isPbGraphOnline()) {
+  const minuteKey = getMinuteKey();
+  if (lastOfflineMinuteKey !== minuteKey) {
+   lastOfflineMinuteKey = minuteKey;
+   emitPowerMinutePoint(minuteKey, 0, 0, true);
+  }
+  if (powerHistory.length === 0) ingestPbOfflineSample();
+ }
+}, 1500);
 
 server.listen(PORT, '0.0.0.0', () => {
  console.log(`오픈 관제 동적 스케줄링 통합 마스터 로컬 서버 가동 포트: ${PORT}`);
+ console.log(`[SERVER] LAN IP: ${SERVER_LAN_IP} (브로커 설정용)`);
 });

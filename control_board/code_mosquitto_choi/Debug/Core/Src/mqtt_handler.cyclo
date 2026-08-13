@@ -1,1 +1,16 @@
-../Core/Src/mqtt_handler.c:14:6:MQTT_MessageArrived	155
+../Core/Src/mqtt_handler.c:70:13:mqtt_publish_deferred	2
+../Core/Src/mqtt_handler.c:85:6:MqttDeferred_Flush	13
+../Core/Src/mqtt_handler.c:142:6:MqttAd_ProcessPending	1
+../Core/Src/mqtt_handler.c:147:13:mqtt_pb_build_stat	5
+../Core/Src/mqtt_handler.c:176:12:mqtt_ac_mode_from_str	8
+../Core/Src/mqtt_handler.c:189:13:mqtt_ac_temp_c_valid	3
+../Core/Src/mqtt_handler.c:194:13:mqtt_ac_spd_valid	3
+../Core/Src/mqtt_handler.c:199:13:mqtt_ap_mode_valid	8
+../Core/Src/mqtt_handler.c:209:13:mqtt_ap_spd_valid	3
+../Core/Src/mqtt_handler.c:214:13:mqtt_build_ac_stat	1
+../Core/Src/mqtt_handler.c:224:13:mqtt_build_ap_stat	1
+../Core/Src/mqtt_handler.c:234:13:mqtt_process_ac_pending	35
+../Core/Src/mqtt_handler.c:327:13:mqtt_process_ap_pending	61
+../Core/Src/mqtt_handler.c:450:6:MqttPending_Process	16
+../Core/Src/mqtt_handler.c:530:13:mqtt_build_ad_stat	3
+../Core/Src/mqtt_handler.c:541:6:MQTT_MessageArrived	109

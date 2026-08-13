@@ -1,0 +1,333 @@
+#include "himpel.h"
+#include "app.h"
+#include <stdio.h>
+#include <string.h>
+//공기 청정기
+/* ======================================================================
+   [1. 내부 상태 관리 변수]
+   ====================================================================== */
+static HIMPEL_SM _nextState = HIMPEL_SM_STX;
+static uint8_t  _dataBuf[RX_BUFFER_SIZE];
+static uint8_t  _dataIndex = 0;
+static uint8_t  _recvBuf[HIMPEL_PACKET_SIZE];
+static volatile uint8_t _received = 0;
+//extern void getAPStatusAll(APData* dest);
+/* ======================================================================
+   [2. 초기화 및 내부 업데이트 로직]
+   ====================================================================== */
+
+void Himpel_Init(void) {
+    HimpelSmReset();
+    // RTX_DIR3_Pin (PB15) 초기값: 수신 모드 (RESET)
+    HAL_GPIO_WritePin(RTX_DIR3_GPIO_Port, RTX_DIR3_Pin, GPIO_PIN_RESET);
+}
+
+void HimpelSmReset(void) {
+    _nextState = HIMPEL_SM_STX;
+    _dataIndex = 0;
+    memset(_dataBuf, 0x00, sizeof(_dataBuf));
+}
+
+/**
+ * @brief 수신된 패킷을 구조체에 매핑 (Mutex 보호)
+ */
+void HimpelUpdateStatus(const uint8_t* buffer) {
+    HimpelStatusMessage msg;
+
+    // 17바이트 데이터 영역을 구조체에 복사 (Bit-field 매핑)
+    memcpy(&msg, buffer, sizeof(HimpelStatusMessage));
+
+    // Mutex를 사용하여 dev_status 접근 보호
+    if (osMutexAcquire(mqtt_mutex_id, 200) == osOK) {
+
+        /* 1. 기본 제어 상태 변환 (Bit -> String/Int) */
+        // 전원
+        strcpy(dev_status.ap.pwr, msg.ubPower ? "ON" : "OFF");
+
+        // 모드 (우선순위 판별)
+        if      (msg.ubAutomatic)   strcpy(dev_status.ap.mode, "AUTO");
+        else if (msg.ubAirClean)    strcpy(dev_status.ap.mode, "CLEAN");
+        else if (msg.ubVentilation) strcpy(dev_status.ap.mode, "VENT");
+        else if (msg.ubBypass)      strcpy(dev_status.ap.mode, "BYPASS");
+        else if (msg.ubModeHeater)  strcpy(dev_status.ap.mode, "HEATER");
+        else                        strcpy(dev_status.ap.mode, "NONE");
+
+        // 풍량 (0~4)
+        if      (msg.ubFanOff)   dev_status.ap.fan_speed = 0;
+        else if (msg.ubFanLow)   dev_status.ap.fan_speed = 1;
+        else if (msg.ubFanMid)   dev_status.ap.fan_speed = 2;
+        else if (msg.ubFanHigh)  dev_status.ap.fan_speed = 3;
+        else if (msg.ubFanTurbo) dev_status.ap.fan_speed = 4;
+
+        dev_status.ap.uv_on = (bool)msg.ubUV;
+
+        /* 2. 공기질 데이터 변환 (High/Low Byte -> Int) */
+        dev_status.ap.co2        = (msg.u8CO2_H << 8) | msg.u8CO2_L;
+        dev_status.ap.dust_pm25  = (msg.u8PM25_H << 8) | msg.u8PM25_L;
+        dev_status.ap.dust_pm10  = (msg.u8PM10_H << 8) | msg.u8PM10_L;
+        dev_status.ap.dust_pm1_0 = (msg.u8PM1_0_H << 8) | msg.u8PM1_0_L;
+        dev_status.ap.tvoc       = (msg.u8TVOC_H << 8) | msg.u8TVOC_L;
+
+        /* 3. 온습도 데이터 변환 (Sign+Value -> Float) */
+        // 실내온도
+        dev_status.ap.temp_in  = msg.inTempSign ? -(float)msg.inTempVal : (float)msg.inTempVal;
+        // 실외온도
+        dev_status.ap.temp_out = msg.outTempSign ? -(float)msg.outTempVal : (float)msg.outTempVal;
+        // 습도
+        dev_status.ap.humi     = msg.inHumiVal;
+
+        /* 4. 장치 관리 상태 */
+        dev_status.ap.is_connected = true;
+        // DATA 3 에러 바이트를 그대로 저장
+        dev_status.ap.error_code = ((uint8_t*)&msg)[3];
+
+        // 필터 수명 (에러 비트 기반 간접 계산 또는 고정)
+        dev_status.ap.filter_life = (msg.ubCtrlErr) ? 0 : 100;
+
+        osMutexRelease(mqtt_mutex_id);
+    }
+}
+
+/* ======================================================================
+   [3. 통신 레이어 (UART3 / RS485 제어)]
+   ====================================================================== */
+
+
+int HimpelSendData(HIMPEL_ID da, HIMPEL_CMD cmd, const HimpelControlMessage* msg) {
+    uint8_t sendBuf[HIMPEL_PACKET_SIZE] = {0};
+    uint8_t frc = 0x00;
+
+    sendBuf[0] = HIMPEL_STX;
+    sendBuf[1] = HIMPEL_HEADER;
+    sendBuf[2] = ID_CONTROL;
+    sendBuf[3] = (uint8_t)da;  // HIMPEL_ID 타입을 uint8_t로 캐스팅
+    sendBuf[4] = (uint8_t)cmd; // HIMPEL_CMD 타입을 uint8_t로 캐스팅
+
+    if (cmd == CMD_CONTROL && msg != NULL) {
+        memcpy(&sendBuf[5], msg, sizeof(HimpelControlMessage));
+    } else {
+        // 상태 요청(0x01) 시 데이터 영역은 보통 0x00 또는 0xFF로 채움 (규격서 준수)
+        memset(&sendBuf[5], 0x00, HIMPEL_DATA_SIZE);
+    }
+
+    // FRC 계산 (XOR)
+    for (int i = 1; i < HIMPEL_PACKET_SIZE - 2; i++) frc ^= sendBuf[i];
+    sendBuf[22] = frc;
+    sendBuf[23] = HIMPEL_EOP;
+
+    _received = 0;
+
+    // RS485 방향 제어 (TX)
+    HAL_GPIO_WritePin(RTX_DIR3_GPIO_Port, RTX_DIR3_Pin, GPIO_PIN_SET);
+    HAL_UART_Transmit(&huart3, sendBuf, HIMPEL_PACKET_SIZE, 100);
+    while (__HAL_UART_GET_FLAG(&huart3, UART_FLAG_TC) == RESET); // 전송 완료 대기
+    HAL_GPIO_WritePin(RTX_DIR3_GPIO_Port, RTX_DIR3_Pin, GPIO_PIN_RESET); // RX 모드 전환
+
+    // 응답 대기 루프 (app.c 로직 유지)
+    for (int i = 0; i < RETRY_COUNT; i++) {
+        osDelay(50);
+        if (_received) break;
+    }
+
+    if (_received) {
+        // 수신된 패킷 검증 후 업데이트
+        uint8_t c_frc = 0x00;
+        for (int i = 1; i < HIMPEL_PACKET_SIZE - 2; i++) c_frc ^= _recvBuf[i];
+        if (c_frc == _recvBuf[22]) {
+            HimpelUpdateStatus(_recvBuf);
+            return 0; // 성공
+        }
+    }
+
+    // 통신 실패 시 처리
+    if (osMutexAcquire(mqtt_mutex_id, 100) == osOK) {
+        dev_status.ap.is_connected = false;
+        osMutexRelease(mqtt_mutex_id);
+    }
+    return -1; // 실패
+}
+
+
+/**
+ * @brief UART Rx Interrupt 등에서 호출하는 상태 머신
+ */
+void HimpelSmInput(uint8_t input) {
+    if (_dataIndex >= RX_BUFFER_SIZE) HimpelSmReset();
+    _dataBuf[_dataIndex++] = input;
+
+    switch (_nextState) {
+        case HIMPEL_SM_STX:  if (input == HIMPEL_STX) _nextState = HIMPEL_SM_HD; else _dataIndex = 0; break;
+        case HIMPEL_SM_HD:   if (input == HIMPEL_HEADER) _nextState = HIMPEL_SM_DA; else HimpelSmReset(); break;
+        case HIMPEL_SM_DA:   _nextState = HIMPEL_SM_SA; break;
+        case HIMPEL_SM_SA:   _nextState = HIMPEL_SM_CMD; break;
+        case HIMPEL_SM_CMD:  _nextState = HIMPEL_SM_DATA; break;
+        case HIMPEL_SM_DATA: if (_dataIndex >= 5 + HIMPEL_DATA_SIZE) _nextState = HIMPEL_SM_FRC; break;
+        case HIMPEL_SM_FRC:  _nextState = HIMPEL_SM_EOP; break;
+        case HIMPEL_SM_EOP:
+            if (input == HIMPEL_EOP) {
+                memcpy(_recvBuf, _dataBuf, HIMPEL_PACKET_SIZE);
+                _received = 1;
+            }
+            HimpelSmReset();
+            break;
+    }
+}
+
+/* ======================================================================
+   [4. Setter API (제어용)]
+   ====================================================================== */
+
+static void PrepareAPControl(HimpelControlMessage* msg) {
+    memset(msg, 0, sizeof(HimpelControlMessage));
+    osMutexAcquire(mqtt_mutex_id, osWaitForever);
+
+    msg->ubPower = (strcmp(dev_status.ap.pwr, "ON") == 0);
+    msg->ubAutomatic = (strcmp(dev_status.ap.mode, "AUTO") == 0);
+    msg->ubAirClean = (strcmp(dev_status.ap.mode, "CLEAN") == 0);
+    msg->ubVentilation = (strcmp(dev_status.ap.mode, "VENT") == 0);
+    msg->ubBypass = (strcmp(dev_status.ap.mode, "BYPASS") == 0);
+    msg->ubUV = dev_status.ap.uv_on;
+
+    int spd = dev_status.ap.fan_speed;
+    if      (spd == 4) msg->ubFanTurbo = 1;
+    else if (spd == 3) msg->ubFanHigh = 1;
+    else if (spd == 2) msg->ubFanMid = 1;
+    else if (spd == 1) msg->ubFanLow = 1;
+    else               msg->ubFanOff = 1;
+
+    osMutexRelease(mqtt_mutex_id);
+}
+
+void setAPPower(int on) {
+    HimpelControlMessage msg;
+    PrepareAPControl(&msg);
+    msg.ubPower = on ? 1 : 0;
+    msg.ubFanOff = on ? 0 : 1;
+    // ID_STANDALONE 대신 헤더에 있는 ID_SINGLE 사용
+    HimpelSendData(ID_SINGLE, CMD_CONTROL, &msg);
+}
+
+void setAPMode(const char* mode) {
+    HimpelControlMessage msg;
+    PrepareAPControl(&msg);
+    msg.ubAutomatic = 0; msg.ubAirClean = 0; msg.ubVentilation = 0; msg.ubBypass = 0;
+    if      (strcmp(mode, "AUTO") == 0)   msg.ubAutomatic = 1;
+    else if (strcmp(mode, "CLEAN") == 0)  msg.ubAirClean = 1;
+    else if (strcmp(mode, "VENT") == 0)   msg.ubVentilation = 1;
+    else if (strcmp(mode, "BYPASS") == 0) msg.ubBypass = 1;
+    HimpelSendData(ID_SINGLE, CMD_CONTROL, &msg);
+}
+
+void setAPSpeed(int speed) {
+    HimpelControlMessage msg;
+    PrepareAPControl(&msg);
+    msg.ubFanOff = 0; msg.ubFanLow = 0; msg.ubFanMid = 0; msg.ubFanHigh = 0; msg.ubFanTurbo = 0;
+    if      (speed == 4) msg.ubFanTurbo = 1;
+    else if (speed == 3) msg.ubFanHigh = 1;
+    else if (speed == 2) msg.ubFanMid = 1;
+    else if (speed == 1) msg.ubFanLow = 1;
+    else               { msg.ubFanOff = 1; msg.ubPower = 0; }
+    HimpelSendData(ID_SINGLE, CMD_CONTROL, &msg);
+}
+
+void setAPUV(int on) {
+    HimpelControlMessage msg;
+    PrepareAPControl(&msg);
+    msg.ubUV = on ? 1 : 0;
+    HimpelSendData(ID_SINGLE, CMD_CONTROL, &msg);
+}
+void setAPFilterReset(int on) {
+    if (on == 0) return;
+    HimpelControlMessage msg;
+    PrepareAPControl(&msg);
+    msg.ubFilterAlarmOccur = 0;
+    HimpelSendData(ID_SINGLE, CMD_CONTROL, &msg);
+}
+void setAPTimer(int minutes) {
+    HimpelControlMessage msg;
+    PrepareAPControl(&msg);
+    msg.reserved[0] = (uint8_t)minutes; // 예약 데이터 영역 활용
+    HimpelSendData(ID_SINGLE, CMD_CONTROL, &msg);
+}
+void setAPBypass(int on) {
+    HimpelControlMessage msg;
+    PrepareAPControl(&msg);
+    msg.ubBypass = (on ? 1 : 0);
+    // 바이패스 시 자동/환기 모드와 충돌 방지 로직
+    if (on) { msg.ubAutomatic = 0; msg.ubVentilation = 0; }
+    HimpelSendData(ID_SINGLE, CMD_CONTROL, &msg);
+}
+
+/* ======================================================================
+   [5. Getter API (조회용)]
+   ====================================================================== */
+int getFanStatus(void) {
+    // 여기도 ID_SINGLE로 변경
+    return HimpelSendData(ID_SINGLE, CMD_REQ_STATUS, NULL);
+}
+
+int requestAPUpdate(void) {
+    return getFanStatus();
+}
+
+void getAPStatusAll(APData* dest) {
+    if (dest == NULL) return;
+    osMutexAcquire(mqtt_mutex_id, osWaitForever);
+    *dest = dev_status.ap;
+    osMutexRelease(mqtt_mutex_id);
+}
+
+int getAPPower(void) {
+    int pwr;
+    osMutexAcquire(mqtt_mutex_id, osWaitForever);
+    pwr = (strcmp(dev_status.ap.pwr, "ON") == 0) ? 1 : 0;
+    osMutexRelease(mqtt_mutex_id);
+    return pwr;
+}
+
+int getAPSpeed(void) {
+    int speed;
+    osMutexAcquire(mqtt_mutex_id, osWaitForever);
+    speed = dev_status.ap.fan_speed;
+    osMutexRelease(mqtt_mutex_id);
+    return speed;
+}
+
+int getAPCo2(void) {
+    int co2;
+    osMutexAcquire(mqtt_mutex_id, osWaitForever);
+    co2 = dev_status.ap.co2;
+    osMutexRelease(mqtt_mutex_id);
+    return co2;
+}
+
+int getAPDust(void) {
+    int dust;
+    osMutexAcquire(mqtt_mutex_id, osWaitForever);
+    dust = dev_status.ap.dust_pm25;
+    osMutexRelease(mqtt_mutex_id);
+    return dust;
+}
+
+bool isAPUvActive(void) {
+    bool uv;
+    osMutexAcquire(mqtt_mutex_id, osWaitForever);
+    uv = dev_status.ap.uv_on;
+    osMutexRelease(mqtt_mutex_id);
+    return uv;
+}
+
+int getAPFilterLife(void) {
+    int life;
+    osMutexAcquire(mqtt_mutex_id, osWaitForever);
+    life = dev_status.ap.filter_life;
+    osMutexRelease(mqtt_mutex_id);
+    return life;
+}
+
+void getAPModeString(char* dest) {
+    if (dest == NULL) return;
+    osMutexAcquire(mqtt_mutex_id, osWaitForever);
+    strcpy(dest, dev_status.ap.mode);
+    osMutexRelease(mqtt_mutex_id);
+}

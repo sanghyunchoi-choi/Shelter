@@ -50,6 +50,7 @@ void App_Init(void) {
 	// 3. 디버그 출력 (UART2)
 	printf("\r\n==================================\r\n");
 	printf(" Power Board Monitoring System\r\n");
+	printf(" Current  : ACS712-05B (185 mV/A, +/-5 A)\r\n");
 	printf(" Board ID : %d (0x%02X)\r\n", g_board_id, g_board_id);
 	printf("==================================\r\n");
 
@@ -144,7 +145,7 @@ void App_Process_Packet(void) {
 				printf(" >> Ch%d -> Changed to %s\r\n", i + 1, target_state ? "ON" : "OFF");
 
 				// 3. 돌입 전류 및 전압 드롭(Drop)을 막기 위해 상태 변경 발생 시에만 200ms 대기
-				HAL_Delay(2000);
+				HAL_Delay(200);
 
 			} else {
 				// 이미 요청한 상태와 기존 하드웨어 상태가 똑같다면 딜레이 없이 즉시 다음 채널 패스 (Skip!)

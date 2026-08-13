@@ -1,0 +1,5 @@
+../w5500/ioLibrary_Driver-master/Internet/SNTP/sntp.c:74:6:get_seconds_from_ntp_server	40
+../w5500/ioLibrary_Driver-master/Internet/SNTP/sntp.c:215:6:SNTP_init	1
+../w5500/ioLibrary_Driver-master/Internet/SNTP/sntp.c:246:8:SNTP_run	8
+../w5500/ioLibrary_Driver-master/Internet/SNTP/sntp.c:335:6:calcdatetime	27
+../w5500/ioLibrary_Driver-master/Internet/SNTP/sntp.c:431:8:changedatetime_to_seconds	20

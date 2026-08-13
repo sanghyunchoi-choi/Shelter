@@ -5,6 +5,23 @@
 
 extern UART_HandleTypeDef huart5;
 
+static osMutexId_t s_pb_uart_mutex;
+
+static bool PB_UartLock(uint32_t timeout_ms)
+{
+    if (s_pb_uart_mutex == NULL) {
+        return true;
+    }
+    return (osMutexAcquire(s_pb_uart_mutex, timeout_ms) == osOK);
+}
+
+static void PB_UartUnlock(void)
+{
+    if (s_pb_uart_mutex != NULL) {
+        osMutexRelease(s_pb_uart_mutex);
+    }
+}
+
 /**
  * @brief RS485 방향 제어 (High: 송신, Low: 수신)
  */
@@ -27,6 +44,9 @@ uint8_t PowerBoard_CalculateBCC(uint8_t *data, uint8_t len) {
  * @brief 파워보드 초기화 (통합 구조체 dev_status 참조)
  */
 void PowerBoard_Init(void) {
+    if (s_pb_uart_mutex == NULL) {
+        s_pb_uart_mutex = osMutexNew(NULL);
+    }
     RS485_PWR_SetMode(GPIO_PIN_RESET); // 기본 수신 대기
 
     // 기본값 설정 (ID 구분 없이 초기화가 필요한 경우 사용)
@@ -35,7 +55,7 @@ void PowerBoard_Init(void) {
         dev_status.pwr_ch[i].volt = 220;
         dev_status.pwr_ch[i].curr = 0.0f;
         dev_status.pwr_ch[i].watt = 0.0f;
-        dev_status.pwr_ch[i].b_id = 1; // 기본 초기화 ID 가드
+        dev_status.pwr_ch[i].b_id = 0; /* RS485 수신 전 placeholder — PB 패킷에서 실측 ID로 갱신 */
         strcpy(dev_status.pwr_ch[i].pwr, "OFF");
     }
 }
@@ -47,6 +67,10 @@ HAL_StatusTypeDef PowerBoard_UpdateAllData(PowerData *pwr_array) {
     uint8_t rx_buf[PWR_RES_LEN] = {0};
     uint8_t head = 0;
     uint32_t start_tick = HAL_GetTick();
+
+    if (!PB_UartLock(200)) {
+        return HAL_TIMEOUT;
+    }
 
     // 1. 수신 모드 고정 및 쓰레기 FIFO 청소
     RS485_PWR_SetMode(GPIO_PIN_RESET);
@@ -65,18 +89,28 @@ HAL_StatusTypeDef PowerBoard_UpdateAllData(PowerData *pwr_array) {
         if (HAL_UART_Receive(&huart5, &head, 1, 10) == HAL_OK && head == 0x02) {
             break;
         }
-        if (HAL_GetTick() - start_tick > 1200) return HAL_TIMEOUT;
+        if (HAL_GetTick() - start_tick > 1200) {
+            PB_UartUnlock();
+            return HAL_TIMEOUT;
+        }
     }
 
     // 3. 나머지 29바이트 수신
     rx_buf[0] = 0x02;
     if (HAL_UART_Receive(&huart5, &rx_buf[1], PWR_RES_LEN - 1, 100) != HAL_OK) {
+        PB_UartUnlock();
         return HAL_TIMEOUT;
     }
 
     // 4. 패킷 유효성 검증 (ETX, BCC 체크)
-    if (rx_buf[28] != 0x03) return HAL_ERROR;
-    if (rx_buf[29] != PowerBoard_CalculateBCC(rx_buf, 29)) return HAL_ERROR;
+    if (rx_buf[28] != 0x03) {
+        PB_UartUnlock();
+        return HAL_ERROR;
+    }
+    if (rx_buf[29] != PowerBoard_CalculateBCC(rx_buf, 29)) {
+        PB_UartUnlock();
+        return HAL_ERROR;
+    }
 
     // 5. 데이터 파싱 및 구조체 직접 매핑
     // 💡 고정 ID를 검사하지 않고, 수신 패킷 1번지의 실제 ID를 구조체 멤버에 바로 주입합니다.
@@ -95,6 +129,7 @@ HAL_StatusTypeDef PowerBoard_UpdateAllData(PowerData *pwr_array) {
         pwr_array[i].ch = i + 1;
     }
 
+    PB_UartUnlock();
     return HAL_OK;
 }
 
@@ -104,6 +139,10 @@ HAL_StatusTypeDef PowerBoard_UpdateAllData(PowerData *pwr_array) {
  */
 HAL_StatusTypeDef PowerBoard_ControlAll(uint8_t board_id, uint8_t *states) {
     uint8_t packet[14];
+
+    if (!PB_UartLock(500)) {
+        return HAL_TIMEOUT;
+    }
 
     packet[0] = 0x02;     // STX
     packet[1] = board_id; // ID
@@ -138,6 +177,7 @@ HAL_StatusTypeDef PowerBoard_ControlAll(uint8_t board_id, uint8_t *states) {
     for(volatile int delay_gap = 0; delay_gap < 500; delay_gap++);
     RS485_PWR_SetMode(GPIO_PIN_RESET);
 
+    PB_UartUnlock();
     return status;
 }
 

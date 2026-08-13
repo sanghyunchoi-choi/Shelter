@@ -171,7 +171,7 @@ void HimpelUpdateStatus(const uint8_t* packet)
     /* 5. 장치 관리 */
     dev_status.ap.is_connected = true;
     dev_status.ap.error_code   = ((uint8_t*)&msg)[3];
-    /* Himpel 프로토콜에 필터 잔량 % 필드 없음 — 알람/센서 에러 없으면 100% */
+    /* Himpel 패킷에 필터 잔량 % 없음 — 알람/센서 이상 시 0, 정상 시 100 */
     dev_status.ap.filter_life  = (msg.ubDustErr || msg.ubCO2Err || msg.ubCtrlErr) ? 0 : 100;
 
     osMutexRelease(mqtt_mutex_id);
@@ -224,7 +224,7 @@ int HimpelSendData(HIMPEL_ID da, HIMPEL_CMD cmd, const HimpelControlMessage* msg
         uint32_t tc_start = HAL_GetTick();
         while (__HAL_UART_GET_FLAG(&huart3, UART_FLAG_TC) == RESET) {
             if ((HAL_GetTick() - tc_start) > 50) {
-                printf("[AC] TX TC flag timeout — RS485 line fault?\r\n");
+                printf("[AP] TX TC flag timeout — RS485 line fault?\r\n");
                 break;
             }
         }
@@ -233,7 +233,12 @@ int HimpelSendData(HIMPEL_ID da, HIMPEL_CMD cmd, const HimpelControlMessage* msg
     osDelay(SHELTER_RS485_TURNAROUND_MS);
     HimpelEnsureRxIT();
 
-    for (int i = 0; i < RETRY_COUNT; i++) {
+    int max_retry = RETRY_COUNT;
+    if (cmd == CMD_REQ_STATUS && !dev_status.ap.is_connected) {
+        max_retry = SHELTER_RS485_OFFLINE_RETRIES;
+    }
+
+    for (int i = 0; i < max_retry; i++) {
         osDelay(SHELTER_RS485_ACK_RETRY_MS);
         if (_received) {
             break;
@@ -265,7 +270,7 @@ int HimpelSendData(HIMPEL_ID da, HIMPEL_CMD cmd, const HimpelControlMessage* msg
 #endif
     }
 
-    if (ret != 0) {
+    if (ret != 0 && cmd == CMD_REQ_STATUS) {
         if (osMutexAcquire(mqtt_mutex_id, 100) == osOK) {
             dev_status.ap.is_connected = false;
             osMutexRelease(mqtt_mutex_id);
@@ -382,6 +387,9 @@ int setAPMode(const char* mode)
 
 int setAPSpeed(int speed)
 {
+    if (speed < 0 || speed > 4) {
+        return -1;
+    }
     HimpelControlMessage msg;
     if (PrepareAPControl(&msg) != 0) return -1;
     /* 풍량 비트 초기화 후 해당 속도만 설정 */
@@ -431,6 +439,12 @@ int setAPTimer(int minutes)
 int setAPAll(int pwr, const char* mode, int speed, int uv,
              int filter_reset, int bypass, int timer_minutes)
 {
+    if (speed < 0 || speed > 4) {
+        return -1;
+    }
+    if (timer_minutes < 0 || timer_minutes > 255) {
+        return -1;
+    }
     HimpelControlMessage msg;
     if (PrepareAPControl(&msg) != 0) return -1;
 

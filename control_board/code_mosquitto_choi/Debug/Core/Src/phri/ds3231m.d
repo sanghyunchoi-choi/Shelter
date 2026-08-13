@@ -36,11 +36,11 @@ Core/Src/phri/ds3231m.o: ../Core/Src/phri/ds3231m.c \
  ../Drivers/STM32H7xx_HAL_Driver/Inc/stm32h7xx_hal_tim_ex.h \
  ../Drivers/STM32H7xx_HAL_Driver/Inc/stm32h7xx_hal_uart.h \
  ../Drivers/STM32H7xx_HAL_Driver/Inc/stm32h7xx_hal_uart_ex.h \
- D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/w5500/ioLibrary_Driver-master/Ethernet/socket.h \
- D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/w5500/ioLibrary_Driver-master/Ethernet/wizchip_conf.h \
- D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/w5500/ioLibrary_Driver-master/Ethernet/W5500/w5500.h \
- D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/w5500/ioLibrary_Driver-master/Ethernet/wizchip_conf.h \
- D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/w5500/ioLibrary_Driver-master/Internet/SNTP/sntp.h
+ ../w5500/ioLibrary_Driver-master/Ethernet/socket.h \
+ ../w5500/ioLibrary_Driver-master/Ethernet/wizchip_conf.h \
+ ../w5500/ioLibrary_Driver-master/Ethernet/W5500/w5500.h \
+ ../w5500/ioLibrary_Driver-master/Ethernet/wizchip_conf.h \
+ ../w5500/ioLibrary_Driver-master/Internet/SNTP/sntp.h
 ../Core/Src/phri/ds3231m.h:
 ../Drivers/STM32H7xx_HAL_Driver/Inc/stm32h7xx_hal.h:
 ../Core/Inc/stm32h7xx_hal_conf.h:
@@ -78,8 +78,8 @@ Core/Src/phri/ds3231m.o: ../Core/Src/phri/ds3231m.c \
 ../Drivers/STM32H7xx_HAL_Driver/Inc/stm32h7xx_hal_tim_ex.h:
 ../Drivers/STM32H7xx_HAL_Driver/Inc/stm32h7xx_hal_uart.h:
 ../Drivers/STM32H7xx_HAL_Driver/Inc/stm32h7xx_hal_uart_ex.h:
-D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/w5500/ioLibrary_Driver-master/Ethernet/socket.h:
-D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/w5500/ioLibrary_Driver-master/Ethernet/wizchip_conf.h:
-D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/w5500/ioLibrary_Driver-master/Ethernet/W5500/w5500.h:
-D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/w5500/ioLibrary_Driver-master/Ethernet/wizchip_conf.h:
-D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/w5500/ioLibrary_Driver-master/Internet/SNTP/sntp.h:
+../w5500/ioLibrary_Driver-master/Ethernet/socket.h:
+../w5500/ioLibrary_Driver-master/Ethernet/wizchip_conf.h:
+../w5500/ioLibrary_Driver-master/Ethernet/W5500/w5500.h:
+../w5500/ioLibrary_Driver-master/Ethernet/wizchip_conf.h:
+../w5500/ioLibrary_Driver-master/Internet/SNTP/sntp.h:

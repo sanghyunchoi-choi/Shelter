@@ -23,10 +23,17 @@ typedef struct {
 extern NetRuntimeConfig g_net_cfg;
 extern volatile bool g_net_cfg_pending;
 
+typedef enum {
+	NET_SAVE_PROFILE = 0,      /* Flash 저장 후 재부팅 (STATIC/DHCP+브로커) */
+	NET_SAVE_FACTORY_DHCP = 1  /* Flash erase → DHCP 공장 초기화 */
+} NetConfigSaveAction;
+
 void NetConfig_CheckRollback(void);
 bool NetConfig_Load(void);
-bool NetConfig_SaveAndApply(const NetRuntimeConfig *new_cfg); /* bool 반환형 튜닝 완료 */
+bool NetConfig_HasFlashProfile(void);
+bool NetConfig_SaveAndApply(const NetRuntimeConfig *new_cfg);
+bool NetConfig_SaveAndApplyEx(const NetRuntimeConfig *new_cfg, NetConfigSaveAction action);
 void NetConfig_ConfirmBoot(void);
-void Reset_NetConfig_Flash_Sector(void);
+void NetConfig_ExecuteFlashEraseAndReboot(void);
 
 #endif /* INC_NET_CONFIG_H_ */

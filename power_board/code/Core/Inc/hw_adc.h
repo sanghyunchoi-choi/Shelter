@@ -15,15 +15,16 @@
 #define ADC_VREF                3.3f
 #define ADC_RESOLUTION          4095.0f
 #define VOLTAGE_DIVIDER         (37.0f / 27.0f)   /* MCU pin -> 센서 VOUT 역산 */
-#define SENSOR_SENSITIVITY      0.100f            /* ACS712-20A @ 5V: 100 mV/A */
+#define SENSOR_SENSITIVITY      0.185f            /* ACS712-05B @ 5V: 185 mV/A */
+#define SENSOR_MAX_CURRENT_MA   5000              /* ACS712-05B 정격 ±5 A */
 
 /* 220V AC RMS 측정 (50/60 Hz) */
 #define AC_RMS_SAMPLE_COUNT     80    /* 샘플 수 */
 #define AC_RMS_SAMPLE_PERIOD_MS 1     /* 80ms 윈도 ≈ 4주기@50Hz */
 #define AC_ZERO_AVG_COUNT       100   /* 영점 보정 평균 횟수 */
 
-/* 릴레이 ON · 무부하 시 잔류 (mA) — hw_adc.c 배열과 동기 */
-#define CURRENT_DEADBAND_MA     150
+/* 릴레이 ON · 무부하 시 잔류 (mA) — hw_adc.c 배열과 동기 (현장 재보정 권장) */
+#define CURRENT_DEADBAND_MA     40
 
 extern uint16_t g_adc_raw[ADC_CH_COUNT];
 extern const int16_t g_relay_noise_offset[ADC_CH_COUNT];

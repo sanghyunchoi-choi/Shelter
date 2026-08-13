@@ -26,6 +26,12 @@
 /* --- 전역 변수 선언 --- */
 NetRuntimeConfig g_net_cfg;
 volatile bool g_net_cfg_pending = false;
+static bool s_flash_profile_valid = false;
+
+bool NetConfig_HasFlashProfile(void)
+{
+	return s_flash_profile_valid;
+}
 
 /**
  * @brief 플래시 메모리 프로파일 무결성 연산 검증용 8비트 정렬 합산기
@@ -120,23 +126,29 @@ static bool flash_write_bytes(uint32_t offset, const void *buf, uint32_t len)
 
 static void load_defaults(NetRuntimeConfig *c)
 {
-    uint8_t ip_init[] = SHELTER_NET_IP;
-    uint8_t sn_init[] = SHELTER_NET_SUBNET;
-    uint8_t gw_init[] = SHELTER_NET_GATEWAY;
-    uint8_t dns_init[] = SHELTER_NET_DNS;
     uint8_t bip_init[] = SHELTER_MQTT_BROKER_IP;
 
     memset(c, 0, sizeof(*c));
-    c->net_mode = 1; /* 공장 초기 가동 상태는 DHCP 자동 할당(1) 기어 고정 */
-
+    c->net_mode = 1; /* 공장 초기 / 팩토리 리셋 = DHCP */
     for (int i = 0; i < 4; i++) {
-        c->ip[i] = ip_init[i];
-        c->sn[i] = sn_init[i];
-        c->gw[i] = gw_init[i];
-        c->dns[i] = dns_init[i];
         c->broker_ip[i] = bip_init[i];
     }
     c->broker_port = SHELTER_MQTT_BROKER_PORT;
+    /* DHCP 모드에서는 static IP 프로필을 Flash에 남기지 않음 (0.0.0.0) */
+}
+
+static void netcfg_print_loaded(const NetRuntimeConfig *cfg, int pending)
+{
+    if (cfg->net_mode == 1) {
+        printf("[NETCFG] Loaded from Internal Flash (mode=DHCP, broker=%u.%u.%u.%u:%u, pending=%d)\r\n",
+               cfg->broker_ip[0], cfg->broker_ip[1], cfg->broker_ip[2], cfg->broker_ip[3],
+               cfg->broker_port, pending);
+    } else {
+        printf("[NETCFG] Loaded from Internal Flash (mode=STATIC, ip=%u.%u.%u.%u, broker=%u.%u.%u.%u:%u, pending=%d)\r\n",
+               cfg->ip[0], cfg->ip[1], cfg->ip[2], cfg->ip[3],
+               cfg->broker_ip[0], cfg->broker_ip[1], cfg->broker_ip[2], cfg->broker_ip[3],
+               cfg->broker_port, pending);
+    }
 }
 
 static void write_current(const NetRuntimeConfig *c)
@@ -200,14 +212,11 @@ bool NetConfig_Load(void)
         /* [★타 AI 지적기반 체크섬 교차 가드 검증 보완 완료] */
         if (calc_flash_checksum(&cfg) == cfg.checksum) {
             g_net_cfg = cfg;
+            s_flash_profile_valid = true;
             flash_read_bytes(OFF_PENDING_FLAG, &pending_flag, sizeof(pending_flag));
             g_net_cfg_pending = (pending_flag != 0);
 
-            printf("[NETCFG] Loaded from Internal Flash (mode=%u, board_ip=%u.%u.%u.%u, broker=%u.%u.%u.%u:%u, pending=%d)\r\n",
-                   g_net_cfg.net_mode,
-                   g_net_cfg.ip[0], g_net_cfg.ip[1], g_net_cfg.ip[2], g_net_cfg.ip[3],
-                   g_net_cfg.broker_ip[0], g_net_cfg.broker_ip[1], g_net_cfg.broker_ip[2], g_net_cfg.broker_ip[3],
-                   g_net_cfg.broker_port, g_net_cfg_pending);
+            netcfg_print_loaded(&g_net_cfg, g_net_cfg_pending ? 1 : 0);
             return true;
         }
         printf("[NETCFG] [WARN] Flash Checksum Broken! Forcing Factory Reset Defaults.\r\n");
@@ -215,6 +224,7 @@ bool NetConfig_Load(void)
 
     /* 메모리가 텅 비어있거나 무결성이 파괴되었을 때만 초기 매크로 복사 포매팅 진입 */
     load_defaults(&g_net_cfg);
+    s_flash_profile_valid = false;
     g_net_cfg.checksum = calc_flash_checksum(&g_net_cfg);
     g_net_cfg_pending = false;
     magic = NET_CFG_MAGIC;
@@ -227,7 +237,9 @@ bool NetConfig_Load(void)
     memcpy(&init_block[OFF_FAIL_COUNT], &fail_cnt, sizeof(fail_cnt));
 
     flash_write_bytes(0, init_block, 256);
-    printf("[NETCFG] Internal Flash Formatted & Default Profiles Injected.\r\n");
+    printf("[NETCFG] Factory defaults written (mode=DHCP, no static IP saved, broker=%u.%u.%u.%u:%u)\r\n",
+           g_net_cfg.broker_ip[0], g_net_cfg.broker_ip[1], g_net_cfg.broker_ip[2], g_net_cfg.broker_ip[3],
+           g_net_cfg.broker_port);
 
     return false;
 }
@@ -276,12 +288,17 @@ void NetConfig_ExecuteFlashEraseAndReboot(void)
 }
 
 /**
- * @brief [규격 일치 교정] 웹 설정 저장 및 하드웨어 리셋 통합 처리 함수
+ * @brief Flash 저장 및 재부팅 (기본: NET_SAVE_PROFILE)
  */
 bool NetConfig_SaveAndApply(const NetRuntimeConfig *new_cfg)
 {
+	return NetConfig_SaveAndApplyEx(new_cfg, NET_SAVE_PROFILE);
+}
+
+bool NetConfig_SaveAndApplyEx(const NetRuntimeConfig *new_cfg, NetConfigSaveAction action)
+{
     uint32_t magic = NET_CFG_MAGIC;
-    uint8_t pending = 0;
+    uint8_t pending = (action == NET_SAVE_PROFILE) ? 1U : 0U;
     uint8_t fail_cnt = 0;
     uint8_t write_block[256];
     NetRuntimeConfig temp_cfg;
@@ -290,16 +307,21 @@ bool NetConfig_SaveAndApply(const NetRuntimeConfig *new_cfg)
         return false;
     }
 
-    // 1. [CASE A] DHCP(mode=1) 완전 초기화를 원할 때 -> 플래시 하드웨어 포맷 후 리셋
-    if (new_cfg->net_mode == 1) {
+    if (action == NET_SAVE_FACTORY_DHCP) {
         NetConfig_ExecuteFlashEraseAndReboot();
         return true;
     }
 
-    // 2. [CASE B] 웹 명령(set_net)으로 고정 IP(mode=0)를 저장할 때 -> 데이터 기록 루틴
     temp_cfg = *new_cfg;
+    if (temp_cfg.net_mode != 0 && temp_cfg.net_mode != 1) {
+        temp_cfg.net_mode = 1;
+    }
+    if (temp_cfg.broker_port == 0) {
+        temp_cfg.broker_port = SHELTER_MQTT_BROKER_PORT;
+    }
     temp_cfg.checksum = calc_flash_checksum(&temp_cfg);
     g_net_cfg = temp_cfg;
+    g_net_cfg_pending = (pending != 0);
 
     memset(write_block, 0xFF, sizeof(write_block));
     memcpy(&write_block[OFF_MAGIC], &magic, sizeof(magic));
@@ -308,16 +330,15 @@ bool NetConfig_SaveAndApply(const NetRuntimeConfig *new_cfg)
     memcpy(&write_block[OFF_PENDING_FLAG], &pending, sizeof(pending));
     memcpy(&write_block[OFF_FAIL_COUNT], &fail_cnt, sizeof(fail_cnt));
 
-    /* 실제 내장 플래시에 고정 IP 프로필 쓰기 실행 (내부에서 flash_erase_sector가 한 번 정식으로 돌아감) */
     flash_write_bytes(0, write_block, 256);
-    printf("[NETCFG] New config successfully saved to internal flash. Triggering reboot...\r\n");
+    printf("[NETCFG] Config saved (mode=%s). Rebooting...\r\n",
+           g_net_cfg.net_mode ? "DHCP" : "STATIC");
 
-    HAL_Delay(1000);         // 플래시 컨트롤러가 완벽히 안정화되도록 하드웨어 1초 대기
-    SCB_CleanDCache();       // 코어 캐시(Cache)에 머물러 있는 데이터 메모리로 강제 플러시
-    __disable_irq();         // 인터럽트 완전 차단
-
-    HAL_NVIC_SystemReset();  // 하드웨어 레벨 강제 Reboot 트리거
-    while (1);
+    HAL_Delay(1000);
+    SCB_CleanDCache();
+    __disable_irq();
+    HAL_NVIC_SystemReset();
+    while (1) { }
 
     return true;
 }

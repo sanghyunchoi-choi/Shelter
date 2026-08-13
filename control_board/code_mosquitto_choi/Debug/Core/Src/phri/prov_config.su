@@ -1,0 +1,10 @@
+../Core/Src/phri/prov_config.c:47:13:parse_ipv4_param	32	static
+../Core/Src/phri/prov_config.c:57:13:prov_force_http_listen	48	static
+../Core/Src/phri/prov_config.c:76:13:prov_init_http	8	static
+../Core/Src/phri/prov_config.c:87:6:Prov_IsActive	4	static
+../Core/Src/phri/prov_config.c:92:6:Prov_EnterSetupMode	16	static
+../Core/Src/phri/prov_config.c:118:6:Prov_RunHttpServerTick	8	static
+../Core/Src/phri/prov_config.c:126:6:Prov_TimeTick1s	8	static
+../Core/Src/phri/prov_config.c:134:6:Prov_PrintHeartbeat	112	static
+../Core/Src/phri/prov_config.c:149:9:Prov_HandleStatusCgi	120	static
+../Core/Src/phri/prov_config.c:169:9:Prov_HandleSaveCgi	120	static

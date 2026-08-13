@@ -2,6 +2,7 @@
 #include "app_loop.h"
 #include "config.h"
 #include "net_config.h"
+#include "prov_config.h"
 #include <w5500_ctrl.h>
 #include <ds3231m.h>
 #include "sntp.h"
@@ -31,8 +32,13 @@
 #define FAN_TEMP_MIN       0.0f   // 팬 정지 온도 (0%)
 #define FAN_TEMP_MAX       20.0f  // 팬 최대 가동 온도 (100%)
 #define FAN_TEMP_RANGE     (FAN_TEMP_MAX - FAN_TEMP_MIN)
+#define FAN_TACH_TIMEOUT_RUN_MS   7000U   /* duty>=10%: 회전 피드백 필수 */
+#define FAN_TACH_TIMEOUT_IDLE_MS  60000U  /* duty<10%: 최근 회전 이력으로 배선 확인 */
 
 extern void getAPStatusAll(APData *dest);
+
+static HCSD_HandleTypeDef g_hcsd_sensor;
+static volatile bool g_hcsd_ready = false;
 
 /*
  ========================================================================
@@ -133,6 +139,93 @@ uint32_t last_ap_recv_tick = 0;
 uint32_t last_ac_recv_tick = 0;
 uint32_t disconnect_tick = 0;
 bool show_net_error_log = true;
+static volatile bool g_sensor_periodic_pending = false;
+
+/*
+ ========================================================================
+ [Sensor_PublishEnvironmentReport]
+ Dust/TH/Relay/Input 일괄 MQTT 발행 (부팅 1회 + 10분 주기 공통)
+ 호출 전 mqtt_mutex_id 를 이미 획득한 상태여야 합니다.
+ ======================================================================== */
+static void Sensor_PublishEnvironmentReport(const char *tag)
+{
+	char payload[256];
+	char cur_time[24];
+
+	Get_Current_Time_Log_Str(cur_time, sizeof(cur_time));
+	printf("[Report_time] : %s\r\n", cur_time);
+
+	snprintf(payload, sizeof(payload),
+			"{\"pm1_0\":%d,\"pm2_5\":%d,\"pm10\":%d,\"conn\":%d}",
+			dev_status.dust.pm1_0, dev_status.dust.pm2_5,
+			dev_status.dust.pm10, dev_status.dust.is_connected);
+	MQTTPublish(&c, topics.tele_dust, &(MQTTMessage ) { QOS0, 0, 0, 0,
+					payload, (int) strlen(payload) });
+
+	snprintf(payload, sizeof(payload),
+			"{\"temp\":%.1f,\"humi\":%.1f,\"conn\":%d}",
+			dev_status.th_in.temp, dev_status.th_in.humi,
+			dev_status.th_in.is_connected);
+	MQTTPublish(&c, topics.tele_th_in, &(MQTTMessage ) { QOS0, 0, 0, 0,
+					payload, (int) strlen(payload) });
+
+	snprintf(payload, sizeof(payload),
+			"{\"temp\":%.1f,\"humi\":%.1f,\"conn\":%d}",
+			dev_status.th_out.temp, dev_status.th_out.humi,
+			dev_status.th_out.is_connected);
+	MQTTPublish(&c, topics.tele_th_out, &(MQTTMessage ) { QOS0, 0, 0, 0,
+					payload, (int) strlen(payload) });
+
+	char r_list[128] = { 0 };
+	int r_off = 0;
+	for (int i = 0; i < 15; i++)
+		r_off += snprintf(r_list + r_off, sizeof(r_list) - r_off, "%d%s",
+				dev_status.relay.ch[i] ? 1 : 0, (i < 14) ? "," : "");
+	snprintf(payload, sizeof(payload), "{\"relays\":[%s],\"conn\":1}", r_list);
+	MQTTPublish(&c, topics.tele_ad, &(MQTTMessage ) { QOS0, 0, 0, 0,
+					payload, (int) strlen(payload) });
+
+	snprintf(payload, sizeof(payload),
+			"{\"in\":[%d,%d,%d,%d],\"count\":[%lu,%lu,%lu,%lu],\"conn\":1}",
+			dev_status.in_stat.p4, dev_status.in_stat.p5,
+			dev_status.in_stat.p6, dev_status.in_stat.p7,
+			(unsigned long) dev_status.in_stat.cnt4,
+			(unsigned long) dev_status.in_stat.cnt5,
+			(unsigned long) dev_status.in_stat.cnt6,
+			(unsigned long) dev_status.in_stat.cnt7);
+	MQTTPublish(&c, topics.tele_input, &(MQTTMessage ) { QOS0, 0, 0, 0,
+					payload, (int) strlen(payload) });
+
+	uint32_t sent_tick = HAL_GetTick();
+	last_dust_pub_tick = last_th_in_pub_tick = last_th_out_pub_tick =
+			last_state_pub_tick = sent_tick;
+	last_input_pub_tick = sent_tick;
+	pub_done_dust = pub_done_th_in = pub_done_th_out = pub_done_relay = true;
+	pub_done_input = true;
+	g_sensor_periodic_pending = false;
+	printf("[SENSOR] %s\r\n", tag);
+}
+
+void Sensor_RefreshEnvironmentCache(void)
+{
+	while (DUST_GetReadyData(&dev_status.dust))
+		dev_status.dust.is_connected = true;
+
+	if (g_hcsd_ready && hcsd_UpdateValue(&g_hcsd_sensor) == 0) {
+		hcsd_GetTemperatureAndHumidity(&g_hcsd_sensor, &dev_status.th_in.temp,
+				&dev_status.th_in.humi);
+		dev_status.th_in.is_connected = (dev_status.th_in.temp > 0.1f
+				|| dev_status.th_in.temp < -0.1f);
+	}
+
+	if (CWTTH03S_Modbus_ReadSensor(&dev_status.th_out) == HAL_OK) {
+		dev_status.th_out.is_connected = (dev_status.th_out.temp > 0.1f
+				|| dev_status.th_out.temp < -0.1f);
+	}
+
+	SCAN_External_Inputs();
+}
+
 /*
  ========================================================================
  [MQTT_Reset_Report_Flags]
@@ -170,7 +263,9 @@ void MQTT_Reset_Report_Flags(void) {
 	last_th_out_pub_tick = now - HEARTBEAT_INTERVAL;
 	/* 4. 릴레이 및 시스템 */
 	pub_done_relay = false;
+	pub_done_input = false;
 	last_state_pub_tick = now - HEARTBEAT_INTERVAL;
+	g_sensor_periodic_pending = true;
 	for (int i = 0; i < 15; i++)
 		last_sent_relay[i] = !dev_status.relay.ch[i]; // 반대값 → 변화 강제 감지
 	printf(
@@ -181,6 +276,20 @@ void MQTT_Reset_Report_Flags(void) {
  ========================================================================
  [StartMQTTTask] — MQTT 연결 관리 및 세션 유지
  ======================================================================== */
+static void App_RunProvisioningLoop(void)
+{
+	Prov_EnterSetupMode();
+	uint32_t last_hb = HAL_GetTick();
+	for (;;) {
+		Prov_RunHttpServerTick();
+		if (HAL_GetTick() - last_hb >= 10000U) {
+			last_hb = HAL_GetTick();
+			Prov_PrintHeartbeat();
+		}
+		osDelay(10);
+	}
+}
+
 void StartMQTTTask(void *argument) {
 	Network n;
 	uint8_t buf[512], readbuf[512];
@@ -256,6 +365,24 @@ void StartMQTTTask(void *argument) {
 #define NTP_SYNC_INTERVAL_MS (24UL * 60UL * 60UL * 1000UL) // 24시간
 
 	uint32_t boot_tick = HAL_GetTick();
+	bool flash_profile = NetConfig_HasFlashProfile();
+	bool post_save_grace = flash_profile && g_net_cfg_pending;
+	uint32_t prov_linkup_ms = post_save_grace ? SHELTER_PROV_AFTER_SAVE_MS
+	                                        : SHELTER_PROV_LINKUP_MS;
+	uint32_t prov_deadline_ms = post_save_grace ? SHELTER_PROV_AFTER_SAVE_DEADLINE_MS
+	                                          : SHELTER_PROV_TRIGGER_MS;
+	uint32_t prov_deadline = boot_tick + prov_deadline_ms;
+	bool mqtt_ever_connected = false;
+
+	if (post_save_grace) {
+		printf("[PROV] Config just saved — unplug PC, connect site LAN (router).\r\n");
+		printf("[PROV] DHCP grace %lus; then direct-connect fallback if still no IP.\r\n",
+		       (unsigned long)(prov_linkup_ms / 1000));
+	} else if (flash_profile) {
+		printf("[PROV] Flash config loaded — PC direct: http://192.168.0.100 in %lus (link up, no IP).\r\n",
+		       (unsigned long)(prov_linkup_ms / 1000));
+	}
+
 	for (;;) {
 		is_mqtt_connected = false;
 		uint8_t ip[4];
@@ -284,7 +411,25 @@ void StartMQTTTask(void *argument) {
 		{
 			bool link_was_lost = false;
 			uint32_t wait_log_tick = 0;
+			uint32_t link_up_since = 0;
+			uint32_t prov_wait_log_tick = 0;
 			while (!W5500_NetworkReady(ip)) {
+				bool link_up = ((getPHYCFGR() & 0x01) != 0);
+				if (link_up) {
+					if (link_up_since == 0) {
+						link_up_since = HAL_GetTick();
+					}
+				} else {
+					link_up_since = 0;
+				}
+				if (!mqtt_ever_connected && link_up
+						&& ((HAL_GetTick() > prov_deadline)
+								|| (link_up_since != 0
+										&& (HAL_GetTick() - link_up_since)
+												>= prov_linkup_ms))) {
+					printf("[PROV] Direct-connect setup (link up, no valid IP)\r\n");
+					App_RunProvisioningLoop();
+				}
 				if (!link_was_lost) {
 					osDelay(1000);
 					if (W5500_NetworkReady(ip)) {
@@ -295,18 +440,31 @@ void StartMQTTTask(void *argument) {
 						disconnect_tick = HAL_GetTick();
 					}
 					wait_log_tick = HAL_GetTick();
-					if ((getPHYCFGR() & 0x01) == 0) {
-						printf("[WAIT] Ethernet cable down\r\n");
+					if (!link_up) {
+						printf("[WAIT] Cable down — PC direct (192.168.0.10) or site LAN\r\n");
 					} else {
-						printf(
-								"[WAIT] Waiting for network (see config.h STATIC/DHCP)...\r\n");
+						printf("[WAIT] Link up, waiting for IP (DHCP/STATIC)...\r\n");
 					}
 				} else {
+					if (link_up && link_up_since != 0
+							&& (HAL_GetTick() - prov_wait_log_tick >= 10000)) {
+						prov_wait_log_tick = HAL_GetTick();
+						uint32_t waited_s = (HAL_GetTick() - link_up_since) / 1000;
+						printf("[PROV] No IP yet (%lus / %lus) — PC direct -> http://192.168.0.100\r\n",
+						       (unsigned long)waited_s,
+						       (unsigned long)(prov_linkup_ms / 1000));
+					}
 					if (HAL_GetTick() - wait_log_tick >= 10000) {
 						wait_log_tick = HAL_GetTick();
-						printf("[WAIT] Network not ready (%lu s)\r\n",
-								(unsigned long) ((HAL_GetTick()
-										- disconnect_tick) / 1000));
+						if (!link_up) {
+							printf("[WAIT] Cable down (%lu s)\r\n",
+							       (unsigned long)((HAL_GetTick()
+									       - disconnect_tick) / 1000));
+						} else {
+							printf("[WAIT] Network not ready (%lu s)\r\n",
+							       (unsigned long)((HAL_GetTick()
+									       - disconnect_tick) / 1000));
+						}
 					}
 					osDelay(1000);
 				}
@@ -337,6 +495,10 @@ void StartMQTTTask(void *argument) {
 
 		NewNetwork(&n, MQTT_SOCKET_NUM);
 		if (ConnectNetwork(&n, broker_ip, broker_port) != SOCK_OK) {
+			if (!mqtt_ever_connected && (HAL_GetTick() > prov_deadline)) {
+				printf("[PROV] MQTT broker unreachable — direct-connect mode\r\n");
+				App_RunProvisioningLoop();
+			}
 			if (disconnect_tick == 0)
 				disconnect_tick = HAL_GetTick();
 			is_mqtt_connected = false;
@@ -357,6 +519,7 @@ void StartMQTTTask(void *argument) {
 		data.will.qos = QOS0;
 		if (MQTTConnect(&c, &data) == SUCCESS) {
 			is_mqtt_connected = true;
+			mqtt_ever_connected = true;
 			MQTT_Reset_Report_Flags();
 			NetConfig_ConfirmBoot();
 			if (disconnect_tick != 0) {
@@ -421,7 +584,9 @@ void StartMQTTTask(void *argument) {
 				 * 다른 가전 태스크(AC/AP/전원)의 MQTTPublish와 클록 버스 간섭이 나지 않도록 뮤텍스 락온!! */
 				if (osMutexAcquire(mqtt_mutex_id, 100) == osOK) {
 					int yield_res = MQTTYield(&c, 10);
+					MqttDeferred_Flush();
 					osMutexRelease(mqtt_mutex_id);
+					MqttAd_ProcessPending();
 					if (yield_res != SUCCESS) {
 						printf("[DROP] MQTTYield Failed. Disconnecting.\r\n");
 						break;
@@ -473,6 +638,8 @@ void StartAppTimeTask(void *argument) {
 			// 런타임 모드 스위칭 연동 완료 (w5500_ctrl.c 바인딩 틱 가동)
 			W5500_DhcpTick();
 
+			Prov_TimeTick1s();
+
 			/* 외부 I2C RTC인 DS3231로부터 내부 RTC를 30분마다 초정밀 재동기화 */
 			if (now - last_ds3231_sync_tick >= DS3231_RESYNC_INTERVAL_MS) {
 				last_ds3231_sync_tick = now;
@@ -489,7 +656,8 @@ void StartAppTimeTask(void *argument) {
  (Dust, TH_In, TH_Out, Relay — 주기 보고)
  ======================================================================== */
 void StartAppSensorTask(void *argument) {
-	HCSD_HandleTypeDef h_sensor = hcsd_Init(&hi2c2);
+	g_hcsd_sensor = hcsd_Init(&hi2c2);
+	g_hcsd_ready = true;
 	int retry_in = 0, retry_out = 0;
 	char payload[256];
 	uint32_t now;
@@ -506,8 +674,8 @@ void StartAppSensorTask(void *argument) {
 
 	/* [3. 초기 탐색 (최대 10초)] */
 	for (int i = 0; i < 10; i++) {
-		if (hcsd_UpdateValue(&h_sensor) == 0) {
-			hcsd_GetTemperatureAndHumidity(&h_sensor, &dev_status.th_in.temp,
+		if (hcsd_UpdateValue(&g_hcsd_sensor) == 0) {
+			hcsd_GetTemperatureAndHumidity(&g_hcsd_sensor, &dev_status.th_in.temp,
 					&dev_status.th_in.humi);
 			if (dev_status.th_in.temp > 0.1f || dev_status.th_in.temp < -0.1f)
 				dev_status.th_in.is_connected = true;
@@ -528,59 +696,13 @@ void StartAppSensorTask(void *argument) {
 		osDelay(1000);
 	}
 	/* [4. 부팅 직후 1회 강제 전송] */
-	if (osMutexAcquire(mqtt_mutex_id, 500) == osOK) {
-		snprintf(payload, sizeof(payload),
-				"{\"pm1_0\":%d,\"pm2_5\":%d,\"pm10\":%d,\"conn\":%d}",
-				dev_status.dust.pm1_0, dev_status.dust.pm2_5,
-				dev_status.dust.pm10, dev_status.dust.is_connected);
-		MQTTPublish(&c, topics.tele_dust, &(MQTTMessage ) { QOS0, 0, 0, 0,
-						payload, (int) strlen(payload) });
-
-		snprintf(payload, sizeof(payload),
-				"{\"temp\":%.1f,\"humi\":%.1f,\"conn\":%d}",
-				dev_status.th_in.temp, dev_status.th_in.humi,
-				dev_status.th_in.is_connected);
-		MQTTPublish(&c, topics.tele_th_in, &(MQTTMessage ) { QOS0, 0, 0, 0,
-						payload, (int) strlen(payload) });
-
-		snprintf(payload, sizeof(payload),
-				"{\"temp\":%.1f,\"humi\":%.1f,\"conn\":%d}",
-				dev_status.th_out.temp, dev_status.th_out.humi,
-				dev_status.th_out.is_connected);
-		MQTTPublish(&c, topics.tele_th_out, &(MQTTMessage ) { QOS0, 0, 0, 0,
-						payload, (int) strlen(payload) });
-
-		char r_list[128] = { 0 };
-		int r_off = 0;
-		for (int i = 0; i < 15; i++)
-			r_off += snprintf(r_list + r_off, sizeof(r_list) - r_off, "%d%s",
-					dev_status.relay.ch[i] ? 1 : 0, (i < 14) ? "," : "");
-		snprintf(payload, sizeof(payload), "{\"relays\":[%s],\"conn\":1}",
-				r_list);
-		MQTTPublish(&c, topics.tele_ad, &(MQTTMessage ) { QOS0, 0, 0, 0,
-						payload, (int) strlen(payload) });
-
-		/* v2.0: 외부 입력 4채널 최초 상태 발행 */
-		SCAN_External_Inputs();
-		snprintf(payload, sizeof(payload),
-				"{\"in\":[%d,%d,%d,%d],\"count\":[%lu,%lu,%lu,%lu],\"conn\":1}",
-				dev_status.in_stat.p4, dev_status.in_stat.p5,
-				dev_status.in_stat.p6, dev_status.in_stat.p7,
-				(unsigned long) dev_status.in_stat.cnt4,
-				(unsigned long) dev_status.in_stat.cnt5,
-				(unsigned long) dev_status.in_stat.cnt6,
-				(unsigned long) dev_status.in_stat.cnt7);
-		MQTTPublish(&c, topics.tele_input, &(MQTTMessage ) { QOS0, 0, 0, 0,
-						payload, (int) strlen(payload) });
-		pub_done_input = true;
-
-		uint32_t sent_tick = HAL_GetTick();
-		last_dust_pub_tick = last_th_in_pub_tick = last_th_out_pub_tick =
-				last_state_pub_tick = sent_tick;
-		last_input_pub_tick = sent_tick;
-		pub_done_dust = pub_done_th_in = pub_done_th_out = pub_done_relay =
-				true;
+	SCAN_External_Inputs();
+	if (osMutexAcquire(mqtt_mutex_id, 2000) == osOK) {
+		Sensor_PublishEnvironmentReport("Initial Report Sent.");
 		osMutexRelease(mqtt_mutex_id);
+	} else {
+		printf("[SENSOR] Initial report deferred (mqtt_mutex busy).\r\n");
+		g_sensor_periodic_pending = true;
 	}
 
 	/* [5. 메인 루프] */
@@ -595,6 +717,11 @@ void StartAppSensorTask(void *argument) {
 		while (DUST_GetReadyData(&dev_status.dust)) {
 			dev_status.dust.is_connected = true;
 			last_dust_recv_tick = now;
+		}
+		if (last_dust_recv_tick == 0) {
+			dev_status.dust.is_connected = false;
+		} else if (now - last_dust_recv_tick > 60000U) {
+			dev_status.dust.is_connected = false;
 		}
 
 		/* --- A-1. [v2.0] 기존 4채널 외부 입력 스캔 + 변경 시 즉시 보고 --- */
@@ -623,8 +750,8 @@ void StartAppSensorTask(void *argument) {
 
 		if (now - last_in_recv_tick >= 3000) {
 			last_in_recv_tick = now;
-			if (hcsd_UpdateValue(&h_sensor) == 0) {
-				hcsd_GetTemperatureAndHumidity(&h_sensor,
+			if (hcsd_UpdateValue(&g_hcsd_sensor) == 0) {
+				hcsd_GetTemperatureAndHumidity(&g_hcsd_sensor,
 						&dev_status.th_in.temp, &dev_status.th_in.humi);
 				dev_status.th_in.is_connected = (dev_status.th_in.temp > 0.1f
 						|| dev_status.th_in.temp < -0.1f);
@@ -647,73 +774,14 @@ void StartAppSensorTask(void *argument) {
 			}
 		}
 
-		/* --- B. 주기 보고 (PERIODIC_REPORT_MS)
-		 * 기준 타이머를 하나로 통일하고, osDelay 오차가 누적되는 결함을 막기 위해
-		 * MQTTPublish 직후 전송 완료 시점의 HAL_GetTick()으로 동기화 갱신합니다. --- */
-		if (now - last_th_out_pub_tick >= PERIODIC_REPORT_MS) {
-			if (osMutexAcquire(mqtt_mutex_id, 500) == osOK) {
-				char cur_time[24];
-				Get_Current_Time_Log_Str(cur_time, sizeof(cur_time));
-				printf("[Report_time] : %s\r\n", cur_time);
-
-				/* Dust */
-				snprintf(payload, sizeof(payload),
-						"{\"pm1_0\":%d,\"pm2_5\":%d,\"pm10\":%d,\"conn\":%d}",
-						dev_status.dust.pm1_0, dev_status.dust.pm2_5,
-						dev_status.dust.pm10, dev_status.dust.is_connected);
-				MQTTPublish(&c, topics.tele_dust, &(MQTTMessage ) { QOS0, 0, 0,
-								0, payload, (int) strlen(payload) });
-
-				/* TH_IN */
-				snprintf(payload, sizeof(payload),
-						"{\"temp\":%.1f,\"humi\":%.1f,\"conn\":%d}",
-						dev_status.th_in.temp, dev_status.th_in.humi,
-						dev_status.th_in.is_connected);
-				MQTTPublish(&c, topics.tele_th_in, &(MQTTMessage ) { QOS0, 0, 0,
-								0, payload, (int) strlen(payload) });
-
-				/* TH_OUT */
-				snprintf(payload, sizeof(payload),
-						"{\"temp\":%.1f,\"humi\":%.1f,\"conn\":%d}",
-						dev_status.th_out.temp, dev_status.th_out.humi,
-						dev_status.th_out.is_connected);
-				MQTTPublish(&c, topics.tele_th_out, &(MQTTMessage ) { QOS0, 0,
-								0, 0, payload, (int) strlen(payload) });
-
-				/* Relay */
-				char r_list[128] = { 0 };
-				int r_off = 0;
-				for (int i = 0; i < 15; i++)
-					r_off += snprintf(r_list + r_off, sizeof(r_list) - r_off,
-							"%d%s", dev_status.relay.ch[i] ? 1 : 0,
-							(i < 14) ? "," : "");
-				snprintf(payload, sizeof(payload),
-						"{\"relays\":[%s],\"conn\":1}", r_list);
-				MQTTPublish(&c, topics.tele_ad, &(MQTTMessage ) { QOS0, 0, 0, 0,
-								payload, (int) strlen(payload) });
-
-				/* [v2.0] 외부 입력 4채널 — 변경이 없어도 10분마다 주기 재확인 발행 */
-				snprintf(payload, sizeof(payload),
-						"{\"in\":[%d,%d,%d,%d],\"count\":[%lu,%lu,%lu,%lu],\"conn\":1}",
-						dev_status.in_stat.p4, dev_status.in_stat.p5,
-						dev_status.in_stat.p6, dev_status.in_stat.p7,
-						(unsigned long) dev_status.in_stat.cnt4,
-						(unsigned long) dev_status.in_stat.cnt5,
-						(unsigned long) dev_status.in_stat.cnt6,
-						(unsigned long) dev_status.in_stat.cnt7);
-				MQTTPublish(&c, topics.tele_input, &(MQTTMessage ) { QOS0, 0, 0,
-								0, payload, (int) strlen(payload) });
-
-				/* 타이머를 전송 완료 시점으로 깔끔하게 마감 (타이머 드리프트 차단) */
-				uint32_t sent_tick = HAL_GetTick();
-				last_th_out_pub_tick = last_th_in_pub_tick =
-						last_dust_pub_tick = last_state_pub_tick = sent_tick;
-				last_input_pub_tick = sent_tick;
+		/* --- B. 주기 보고 (PERIODIC_REPORT_MS) --- */
+		if (g_sensor_periodic_pending
+				|| (now - last_th_out_pub_tick >= PERIODIC_REPORT_MS)) {
+			if (osMutexAcquire(mqtt_mutex_id, 2000) == osOK) {
+				Sensor_PublishEnvironmentReport("Periodic Report Sent.");
 				osMutexRelease(mqtt_mutex_id);
-				printf("[SENSOR] Periodic Report Sent.\r\n");
 			}
 		}
-		MQTTYield(&c, 50);
 		osDelay(200);
 	}
 }
@@ -733,7 +801,6 @@ void PowerBoardTask(void *argument) {
 	for (;;) {
 		uint32_t now = HAL_GetTick();
 		if (!is_mqtt_connected) {
-			dev_status.is_pwr_connected = false;
 			reconnect_sync_tick = 0;
 			osDelay(1000);
 			continue;
@@ -743,16 +810,13 @@ void PowerBoardTask(void *argument) {
 			reconnect_sync_tick = now;
 			pwr_fail_cnt = 0;
 		}
-		/* Step A: 데이터 수집 */
-		if (osMutexAcquire(mqtt_mutex_id, 300) == osOK) {
-			if (PowerBoard_UpdateAllData(dev_status.pwr_ch) == HAL_OK) {
-				dev_status.is_pwr_connected = true;
-				pwr_fail_cnt = 0;
-			} else {
-				if (++pwr_fail_cnt >= 10)
-					dev_status.is_pwr_connected = false;
-			}
-			osMutexRelease(mqtt_mutex_id);
+		/* Step A: 데이터 수집 (PB UART 전용 mutex — mqtt_mutex과 분리) */
+		if (PowerBoard_UpdateAllData(dev_status.pwr_ch) == HAL_OK) {
+			dev_status.is_pwr_connected = true;
+			pwr_fail_cnt = 0;
+		} else {
+			if (++pwr_fail_cnt >= 10)
+				dev_status.is_pwr_connected = false;
 		}
 		/* Step B: 보고 판별 */
 		bool should_pub_pwr = false;
@@ -797,10 +861,10 @@ void PowerBoardTask(void *argument) {
 													"," : "");
 						}
 						snprintf(payload + len, sizeof(payload) - len,
-								"],\"conn\":1,\"result\":1}");
+								"],\"conn\":1}");
 					} else {
 						snprintf(payload, sizeof(payload),
-								"{\"b_id\":%d,\"pb\":0,\"conn\":1,\"result\":0}",
+								"{\"b_id\":%d,\"pb\":0,\"conn\":0}",
 								dev_status.pwr_ch[0].b_id);
 					}
 					if (MQTTPublish(&c, topics.tele_pb, &(MQTTMessage ) { QOS0,
@@ -814,7 +878,7 @@ void PowerBoardTask(void *argument) {
 				osMutexRelease(mqtt_mutex_id);
 			}
 		}
-		osDelay(800);
+		osDelay((pub_done_pwr_all && !dev_status.is_pwr_connected) ? 3000 : 800);
 	}
 }
 void APTask(void *argument) {
@@ -828,7 +892,6 @@ void APTask(void *argument) {
 	for (;;) {
 		uint32_t now = HAL_GetTick();
 		if (!is_mqtt_connected) {
-			dev_status.ap.is_connected = false;
 			search_start_tick = 0;
 			search_count = 0;
 			pub_done_ap = false;
@@ -890,7 +953,7 @@ void APTask(void *argument) {
 				osMutexRelease(mqtt_mutex_id);
 			}
 		}
-		osDelay(1500);
+		osDelay((pub_done_ap && !dev_status.ap.is_connected) ? 5000 : 1500);
 	}
 }
 
@@ -906,7 +969,6 @@ void ACTask(void *argument) {
 	for (;;) {
 		uint32_t now = HAL_GetTick();
 		if (!is_mqtt_connected) {
-			dev_status.ac.is_connected = false;
 			is_initial_searching = true;
 			pub_done_ac = false;
 			search_retry_count = 0;
@@ -960,7 +1022,7 @@ void ACTask(void *argument) {
 				osMutexRelease(mqtt_mutex_id);
 			}
 		}
-		osDelay(1000);
+		osDelay((pub_done_ac && !dev_status.ac.is_connected) ? 3000 : 1000);
 	}
 }
 
@@ -1041,12 +1103,16 @@ void FANTask(void *argument) {
 		}
 		__HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_2,
 				dev_status.fan.duty_percent * 10);
+		dev_status.fan.rpm = (int) (fan_rpm + 0.5f);
 		uint32_t signal_diff = now - last_signal_tick;
-		if (dev_status.fan.duty_percent >= 10)
-			dev_status.fan.is_connected = (signal_diff <= 7000);
-		else {
-			dev_status.fan.is_connected = true;
-			last_signal_tick = now;
+		if (dev_status.fan.duty_percent >= 10) {
+			/* 가동 중: 7초 내 타코 펄스 없으면 미연결/고장 */
+			dev_status.fan.is_connected = (last_signal_tick != 0
+					&& signal_diff <= FAN_TACH_TIMEOUT_RUN_MS);
+		} else {
+			/* 정지(低듀티): 회전 감지 불가 — 최근 60초 내 회전 이력 있으면 인버터 배선 OK */
+			dev_status.fan.is_connected = (last_signal_tick != 0
+					&& signal_diff <= FAN_TACH_TIMEOUT_IDLE_MS);
 		}
 		bool should_pub_fan = false;
 		if (!pub_done_fan) {
@@ -1067,12 +1133,13 @@ void FANTask(void *argument) {
 						|| (HAL_GetTick() - last_fan_pub_tick > 5000)) {
 					if (dev_status.fan.is_connected)
 						snprintf(payload, sizeof(payload),
-								"{\"mode\":\"%s\",\"duty\":%d,\"conn\":1}",
+								"{\"mode\":\"%s\",\"duty\":%d,\"rpm\":%d,\"conn\":1}",
 								dev_status.fan.mode,
-								dev_status.fan.duty_percent);
+								dev_status.fan.duty_percent,
+								dev_status.fan.rpm);
 					else
 						snprintf(payload, sizeof(payload),
-								"{\"fan\":0,\"conn\":0}");
+								"{\"fan\":0,\"rpm\":0,\"conn\":0}");
 
 					// ⚠️ [정렬] 가독성을 높이고 컴파일러 인자 유실을 방지하기 위한 구조체 명시화
 					MQTTMessage fan_msg = { QOS0, 0, 0, 0, payload, (int)strlen(payload) };

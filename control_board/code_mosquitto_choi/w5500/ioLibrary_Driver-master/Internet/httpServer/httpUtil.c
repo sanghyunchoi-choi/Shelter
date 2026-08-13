@@ -13,13 +13,17 @@
 #include <string.h>
 #include <stdlib.h>
 #include "httpUtil.h"
+#include "prov_config.h"
+#include <string.h>
 
 uint8_t http_get_cgi_handler(uint8_t * uri_name, uint8_t * buf, uint32_t * file_len) {
     uint8_t ret = HTTP_OK;
     uint16_t len = 0;
 
     if (predefined_get_cgi_processor(uri_name, buf, &len)) {
-        ;
+        /* handled */
+    } else if (strcmp((const char *)uri_name, "status.cgi") == 0) {
+        return Prov_HandleStatusCgi(buf, file_len);
     } else if (strcmp((const char *)uri_name, "example.cgi") == 0) {
         // To do
         ;
@@ -39,8 +43,12 @@ uint8_t http_post_cgi_handler(uint8_t * uri_name, st_http_request * p_http_reque
     uint16_t len = 0;
     uint8_t val = 0;
 
+    if (strcmp((const char *)uri_name, "save.cgi") == 0) {
+        return Prov_HandleSaveCgi(p_http_request, buf, file_len);
+    }
     if (predefined_set_cgi_processor(uri_name, p_http_request->URI, buf, &len)) {
-        ;
+        *file_len = len;
+        return ret;
     } else if (strcmp((const char *)uri_name, "example.cgi") == 0) {
         // To do
         val = 1;
@@ -57,9 +65,16 @@ uint8_t http_post_cgi_handler(uint8_t * uri_name, st_http_request * p_http_reque
 }
 
 uint8_t predefined_get_cgi_processor(uint8_t * uri_name, uint8_t * buf, uint16_t * len) {
-    ;
+    (void)uri_name;
+    (void)buf;
+    (void)len;
+    return 0;
 }
 
 uint8_t predefined_set_cgi_processor(uint8_t * uri_name, uint8_t * uri, uint8_t * buf, uint16_t * en) {
-    ;
+    (void)uri_name;
+    (void)uri;
+    (void)buf;
+    (void)en;
+    return 0;
 }

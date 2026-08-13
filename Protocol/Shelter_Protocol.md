@@ -4,9 +4,16 @@
 > | 버전 | 날짜 | 내용 |
 > |------|------|------|
 > | v1.0 | ~2026-08-08 | `tele/state`에 `uid` 도입 (구 `ip` 필드 대체). 아래 문서 원문(섹션 1~12, 부록 A/B)이 v1.0 기준입니다. |
-> | **v2.0** | **2026-08-10** | **① 외부 입력 4채널(PD4~7) 신규 지원 ② STATIC IP값/MQTT 브로커 IP·포트 EEPROM 저장 + 웹 설정 화면 ③ DHCP↔MQTT 소켓 충돌·RS485 무한대기 등 재접속 안정성 수정 ④ `tele/state`에 `ip`/`mode` 필드 추가.** 변경 내역은 본 문서 맨 아래 "v2.0 변경 사항"에 정리. |
+> | **v2.0** | **2026-08-10** | **① 외부 입력 4채널(PD4~7) ② STATIC IP/브로커 Flash 저장 + CMS 유지보수 화면 ③ DHCP↔MQTT 소켓 충돌·RS485 무한대기 등 재접속 안정성 ④ `tele/state`에 `ip`/`mode` 필드.** |
+> | **v2.1** | **2026-08-12** | **① PC 이더넷 직결 프로비저닝 (`192.168.0.100`) — 양산·현장 최초 설정 표준 ② 펌웨어 1종 + Flash 저장 ③ CMS 네트워크 메뉴는 유지보수 전용으로 역할 분리.** |
+> | **v2.2** | **2026-08-12** | **① 장치별 `conn`(연결됨/오프라인) 판정 조건 명문화 (펌웨어 + CMS) ② 팬 tele에 `rpm` 추가 ③ PB tele 주기·CMS stale 보정.** |
+| **v2.3** | **2026-08-13** | **① PB `b_id` = 전원보드 DIP 4bit(0~15) 실측값 — 고정 ID 아님 ② 서버·CMS는 tele/get_pb의 `b_id` 캐시 후 cmnd에 사용.** |
+| **v2.4** | **2026-08-13** | **① AP tele `temp_out`·`tvoc`·확장 mode·spd 0~4 ② AC spd 1~6 ③ tele/pb `result` 제거 ④ AC/AP 복합 cmnd ⑤ CMS PB·스케줄 정합.** |
+| **v2.5** | **2026-08-13** | **① 환경센서 3종(UP-DM010UB/HC-SD I2C/CWT Modbus) 문서 정리 ② DEV_RESET=소프트 리부트 ③ PB 펌웨어 릴레이 간격 200ms ④ stat/pb 실패 conn 규칙 ⑤ CMS PB b_id 학습 후만 cmnd.** |
 >
-> **서버 전달용 엑셀:** `Shelter_Protocol.xlsx` — `python Protocol/_build_shelter_protocol_xlsx.py` 로 재생성  
+> **서버 전달용 엑셀:** `Shelter_Protocol.xlsx` / `Shelter_Protocol_v1.0.xlsx` — `python Protocol/_build_shelter_protocol_xlsx.py` 로 재생성  
+> **서버·연동 개발자용:** `개발가이드.docx` / `개발가이드_v1.0.docx` — `python Protocol/_build_개발가이드_docx.py` 로 재생성  
+> **설치 업체용 가이드:** `Shelter_Installation_Guide.md` (현장·공장 설치 절차)  
 > **대상 버전:** `MOS_version` (일반 Mosquitto, TLS 미적용)  
 > **참고:** `쉘터_MQTT_프로토콜_규격서.xlsx`는 QMEX TLS 버전용 — 본 문서에서는 제외
 
@@ -19,11 +26,13 @@ Smart Shelter 제어보드(Control Board)가 MQTT 브로커와 JSON 페이로드
 | 항목 | 값 |
 |------|-----|
 | 장치 식별 | `dev/tele/state`의 **`uid`** (STM32 96-bit UID, 24자리 HEX) |
-| LAN 설정 | `Core/Inc/config.h` — **STATIC** 또는 **DHCP** 선택 |
-| 브로커 기본 IP | `192.168.0.100` (`config.h`에서 변경) |
+| **최초 LAN/MQTT 설정** | **PC 직결 HTTP** `http://192.168.0.100` (섹션 **2C**, 설치 가이드 참고) |
+| LAN 모드 (현장) | Flash 저장 — **DHCP 권장** 또는 STATIC |
+| 브로커 | Flash 저장 — 직결 설정 또는 CMS 유지보수 / MQTT `set_broker` |
+| `config.h` | Flash 비어 있을 때만 쓰는 **공장 출하 기본값** (펌웨어 1종 양산) |
 | 브로커 포트 | `1883` (MOS, 비암호화) |
 | 자동 보고 주기 | **10분** (재연결·명령 응답 시 즉시 1회 + 타이머 리셋) |
-| 전원보드 tele | **1초** (연결 감지용, 별도) |
+| 전원보드 tele | **10초** (RS485 폴링 ~0.8s, MQTT 집계) |
 | QoS | 0 (일반) |
 | Keepalive | 30초 |
 | 페이로드 형식 | JSON (UTF-8) |
@@ -43,28 +52,79 @@ Smart Shelter 제어보드(Control Board)가 MQTT 브로커와 JSON 페이로드
 
 | 필드 | 타입 | 설명 |
 |------|------|------|
-| `conn` | int 0/1 | 센서·장치 연결 여부 |
+| `conn` | int 0/1 | 센서·장치 연결 여부 (장치별 판정 — **섹션 1.4**) |
 | `result` | int 0/1 | 명령 처리 결과 (`stat` 응답에만). 1=성공, 0=실패 |
 | `uid` | string | `dev/tele/state` ONLINE 시 STM32 고유 ID (24자리 HEX). **구 `ip` 필드 대체** |
 
-### 1.3 펌웨어 설정 (`Core/Inc/config.h`)
+### 1.3 설정 우선순위 (v2.1)
 
-빌드 전 이 파일만 수정합니다. LAN 모드는 **둘 중 하나만** `1`로 설정합니다.
+| 순위 | 저장 위치 | 용도 |
+|------|-----------|------|
+| 1 | **내부 Flash** (`net_config.c`) | LAN 모드(DHCP/STATIC), IP/SN/GW/DNS, 브로커 IP/포트 — **직결 HTTP 또는 CMS/MQTT로 기록** |
+| 2 | **`config.h` 컴파일 기본값** | Flash erase·공장 초기화 후, 또는 최초 부팅 전까지의 fallback |
 
-| 모드 | 설정 | 동작 |
-|------|------|------|
-| **Static** (기본) | `SHELTER_NET_USE_STATIC 1`, `SHELTER_NET_USE_DHCP 0` | `SHELTER_NET_IP`, `SHELTER_NET_SUBNET`, `SHELTER_NET_GATEWAY`, `SHELTER_NET_DNS` 각 `{a,b,c,d}` |
-| **DHCP** | `SHELTER_NET_USE_STATIC 0`, `SHELTER_NET_USE_DHCP 1` | 부팅 시 DHCP, `StartAppTimeTask`에서 `W5500_DhcpTick()` 1초 주기 |
+**양산·현장 최초 설정**은 CMS가 아니라 **섹션 2C 직결 HTTP**를 사용합니다.  
+**CMS 네트워크 메뉴**와 MQTT `set_net` / `set_broker`는 **이미 ONLINE인 장치 유지보수**용입니다.
 
-MQTT 브로커: `SHELTER_MQTT_BROKER_IP` `{a,b,c,d}`, `SHELTER_MQTT_BROKER_PORT`.
+`config.h` (`Core/Inc/config.h`) 공장 출하 기본:
 
-LAN 주소는 시리얼 로그 `[NET] Link up. LAN x.x.x.x`로 확인 가능하며,
-**v2.0부터는 `dev/tele/state`의 `ip` 필드로도 확인 가능**합니다 (섹션 2.1).
+| 항목 | 공장 기본 |
+|------|-----------|
+| LAN 모드 | **DHCP** (`SHELTER_NET_USE_DHCP 1`) |
+| STATIC fallback IP | `192.168.0.50` / `255.255.255.0` / GW `192.168.0.1` |
+| 브로커 fallback | `SHELTER_MQTT_BROKER_IP` (빌드 시 1회, 예: `192.168.0.107`) |
+| DHCP 소켓 | `SHELTER_DHCP_SOCKET_NUM 3` (MQTT 소켓 0과 분리) |
 
-> **v2.0:** 위 표의 값들은 EEPROM이 비어있는 "최초 출하" 시에만 쓰이는 기본값입니다.
-> STATIC IP값과 브로커 IP/포트는 웹서버 "네트워크 설정" 화면 또는 MQTT 명령으로
-> 런타임 변경 후 EEPROM에 저장됩니다 (섹션 2B). **DHCP/STATIC 모드 자체는 여전히
-> 이 표처럼 재빌드가 필요합니다.**
+LAN 주소는 시리얼 `[NET] Link up. LAN x.x.x.x` 또는 `dev/tele/state`의 `ip` 필드로 확인합니다.
+
+### 1.4 `conn` — 연결됨 / 오프라인 판정 (v2.2)
+
+CMS UI의 **연결됨** 배지는 **각 MQTT tele/stat의 `conn` 필드**를 따릅니다.  
+메인보드 MQTT 메시지가 온다고 **하위 장치가 모두 연결됨으로 바뀌지 않습니다** (v2.2 CMS 수정).
+
+#### 1.4.1 펌웨어 (Control Board) 판정
+
+| 장치 | `conn:1` 조건 | `conn:0` / 미연결 payload | tele 주기 |
+|------|---------------|---------------------------|-----------|
+| **state** (메인보드) | MQTT 브로커 연결 성공 | LWT `{"status":"OFFLINE"}` | 연결/해제 |
+| **dust** | UART 미세먼지 패킷 수신, **60초 이내** 갱신 | 동일 스키마 + `conn:0` | 10분 (+변경 시) |
+| **th_in** | HC-SD **I2C** 읽기 성공 + 온도 ≠ 0±0.1 | 동일 스키마 + `conn:0` | 10분 |
+| **th_in** (끊김) | — | 연속 **30회** 읽기 실패 (~3s×30≈90s) | — |
+| **th_out** | CWT-TH03S Modbus 읽기 성공 + 유효 온도 | 동일 스키마 + `conn:0` | 10분 |
+| **th_out** (끊김) | — | 연속 **10회** 실패 (~2.5s×10≈25s) | — |
+| **ad** | 제어보드 GPIO 릴레이 (항상 부착) | 미연결 payload 없음 | 10분 |
+| **fan** | duty **≥10%**: TIM1 CH3 타코 펄스 **7초 이내** | `{"fan":0,"rpm":0,"conn":0}` | 10분 / conn 변경 |
+| **fan** (저속) | duty **<10%**: 최근 **60초** 내 타코 이력 (배선 확인) | (동일) | — |
+| **pb** | RS485 `PowerBoard_UpdateAllData` **HAL_OK** | `{"b_id":N,"pb":0,"conn":0}` | **10초** |
+| **pb** (끊김) | — | RS485 **연속 10회** 실패 (~0.8s×10≈8s) | — |
+| **ap** | Himpel RS485 응답 OK (`getFanStatus`) | `{"ap":0,"conn":0}` | 10분 |
+| **ap** (끊김) | — | 통신 실패 또는 부팅 후 **10초** 무응답 | — |
+| **ac** | Modbus **Discrete** `ADDR_AC_CONN` 읽기 성공 **且** 비트=1 | `{"ac":0,"conn":0}` | 10분 / ~1s 폴링 |
+| **ac** (끊김) | — | Discrete 읽기 실패 또는 conn 비트=0 | — |
+| **input** | PD4~PD7 GPIO (보드 부착) | 미연결 payload 없음 | 변경 즉시 |
+
+#### 1.4.2 CMS (Web_server_mosquitto) 표시
+
+| 항목 | 규칙 |
+|------|------|
+| **기본** | tele/stat JSON의 `conn` 값만 사용 (`normalizeConn`) |
+| **메인보드 생존** | **아무 MQTT 메시지** 수신 시 `state.conn=1`, **5분** 타이머 리셋 |
+| **메인보드 OFFLINE** | 5분간 MQTT 없음 → `state` OFFLINE + **dust/th/ad/fan/ap/ac/input conn=0** |
+| **PB CMS** | `pb[]` 배열 + `conn:1` → conn·전력 그래프 반영; `pb:0` 또는 배열 없음 → conn=0. **tele에는 `result` 없음** (stat 전용). stale **35초** |
+| **stat 실패** | `result:0` → 해당 장치 `conn=0` (stat 응답 기준) |
+| **PB b_id** | CMS 초기값 **0** — `tele/pb` 수신 후 실측 `b_id` 캐시. 미학습 시 PB cmnd·스케줄 PB 생략 |
+| **스케줄/일괄** | AC/AP 출근 시 **`set_ac` / `set_ap`** 권장 (복합 JSON도 펌웨어 v2.4에서 지원) |
+
+#### 1.4.3 팬 tele (v2.2)
+
+연결 시 예시:
+
+```json
+{"mode":"MANUAL","duty":50,"rpm":1234,"conn":1}
+```
+
+- `rpm`: TIM1 CH3 타코 주파수 환산 (정수, 회/min)
+- duty 0% 근처에서도 인버터 배선만 연결되어 있으면 60초 이내 회전 이력으로 `conn:1` 가능
 
 ---
 
@@ -82,28 +142,34 @@ LAN 주소는 시리얼 로그 `[NET] Link up. LAN x.x.x.x`로 확인 가능하�
 
 - MQTT 연결 시 LWT 설정, retained=1
 - 비정상 종료 시 브로커가 OFFLINE 자동 발행
-- **v2.0 추가:** `ip`(현재 실제 IP), `mode`(`"DHCP"`/`"STATIC"`, 펌웨어 컴파일 값) — 웹서버 "네트워크 설정" 화면에서 표시
+- **v2.0 추가:** `ip`(현재 실제 IP), `mode`(`"DHCP"`/`"STATIC"`, Flash 저장값) — CMS 유지보수 화면에서 표시
 
-### 2.2 먼지센서 — `dev/tele/dust`
+### 2.2 먼지센서 (UP-DM010UB, UART) — `dev/tele/dust`
 
 | 상태 | Payload |
 |------|---------|
 | 연결 | `{"pm1_0":15,"pm2_5":24,"pm10":24,"conn":1}` |
-| 미연결 | `{"dust":0,"conn":0}` |
+| 미연결 | `{"pm1_0":0,"pm2_5":0,"pm10":0,"conn":0}` — **필드 형식 동일**, `conn:0`으로 판정 |
 
-### 2.3 내부 온습도 — `dev/tele/th_in`
+> 구버전 문서의 `{"dust":0,"conn":0}` 형식은 **현재 펌웨어 미사용**. 서버는 **`conn`** 기준으로 오프라인 처리.
+
+### 2.3 내부 온습도 (HC-SD, I2C) — `dev/tele/th_in`
 
 | 상태 | Payload |
 |------|---------|
 | 연결 | `{"temp":25.3,"humi":42.1,"conn":1}` |
-| 미연결 | `{"thindoor":0,"conn":0}` |
+| 미연결 | `{"temp":0.0,"humi":0.0,"conn":0}` — **필드 형식 동일** |
 
-### 2.4 외부 온습도 — `dev/tele/th_out`
+> HC-SD는 **I2C**(HumiChip2), Modbus 아님. 연속 30회 읽기 실패(~90s) 시 `conn:0`.
+
+### 2.4 외부 온습도 (CWT-TH03S, Modbus RTU) — `dev/tele/th_out`
 
 | 상태 | Payload |
 |------|---------|
 | 연결 | `{"temp":12.5,"humi":35.0,"conn":1}` |
-| 미연결 | `{"thoutdoor":0,"conn":0}` |
+| 미연결 | `{"temp":0.0,"humi":0.0,"conn":0}` — **필드 형식 동일** |
+
+> 연속 10회 Modbus 실패(~25s) 시 `conn:0`.
 
 ---
 
@@ -131,12 +197,14 @@ STM32 GPIOD PD4~PD7 4개 디지털 입력. `SCAN_External_Inputs()`가 매 센�
 | `count[0..3]` | 각 채널의 누적 상승엣지 카운트 (부팅 이후, 재부팅 시 0으로 초기화) |
 
 - 웹서버 UI: 4개 원(●) — 흰색=신호없음, 초록색=신호있음, 원 아래에 count 숫자 표시
+- **자동 보고**: PD4–7 상태 변경 시 즉시 `dev/tele/input` 발행. 주기 보고(약 10분)에도 포함.
+- **서버**: `get_input` 주기 폴링 없음 — 제어보드 tele/stat만 수신 처리.
 
 ### 2A.2 Command — `dev/cmnd/input`
 
 | 명령 | Payload | 설명 |
 |------|---------|------|
-| 상태 조회 | `{"get_input":"state"}` | 현재 4채널 상태+카운트 즉시 응답 |
+| 상태 조회 (수동) | `{"get_input":"state"}` | 필요 시 1회 조회 — stat 응답. 서버는 자동 전송하지 않음 |
 | 카운트 초기화 | `{"reset_count":1}` | 4채널 카운트를 0으로 리셋 (입력 상태 자체는 유지) |
 
 ### 2A.3 Stat 응답 — `dev/stat/input`
@@ -147,15 +215,15 @@ STM32 GPIOD PD4~PD7 4개 디지털 입력. `SCAN_External_Inputs()`가 매 센�
 
 ---
 
-## 2B. [v2.0 신규] 네트워크/브로커 설정 — `dev/cmnd/dev`의 `set_net` / `set_broker`
+## 2B. [v2.0] 네트워크/브로커 설정 — 유지보수용 (`set_net` / `set_broker`)
 
-**설계 원칙:** DHCP/STATIC "모드" 선택은 여전히 `config.h`의 컴파일타임 매크로
-(`SHELTER_NET_USE_STATIC`/`SHELTER_NET_USE_DHCP`)로만 결정됩니다. 이 명령들로
-런타임 변경되는 것은 다음 두 가지뿐입니다 (25LC256 EEPROM에 저장, `net_config.c`):
+> **최초 설치·양산:** 섹션 **2C** 직결 HTTP 사용. 본 절은 **이미 LAN/MQTT에 붙은 장치**의 원격 변경용입니다.
 
-1. **STATIC 모드일 때 사용할 IP/서브넷/게이트웨이/DNS 값**
-   (보드가 지금 DHCP로 빌드되어 있으면 저장은 되지만 STATIC으로 재빌드하기 전까지 미적용)
-2. **MQTT 브로커 IP/포트** (DHCP/STATIC 어느 모드든 즉시 적용됨)
+**설계 원칙:** DHCP/STATIC 모드, IP/SN/GW/DNS, 브로커 IP/포트는 **내부 Flash**에 저장됩니다
+(`net_config.c`, Bank2 Sector7). CMS 유지보수 메뉴 또는 아래 MQTT 명령으로 변경 가능합니다.
+
+1. **LAN 모드 및 STATIC IP/SN/GW/DNS**
+2. **MQTT 브로커 IP/포트** (DHCP/STATIC 어느 모드든 재부팅 후 적용)
 
 ### 2B.1 STATIC IP값 변경
 
@@ -185,7 +253,43 @@ STM32 GPIOD PD4~PD7 4개 디지털 입력. `SCAN_External_Inputs()`가 매 센�
 ```
 → 성공 시 500ms 후 재부팅하여 적용 시도
 
-### 2B.3 안전장치 (자동 롤백)
+### 2B.3 DHCP Flash Reset — `set_net_reset`
+
+STATIC IP를 EEPROM/Flash에 저장해 사용하다가 다시 DHCP로 돌아가고 싶을 때 사용합니다.
+
+**Command**
+```json
+{"set_net_reset":1}
+```
+
+**Stat 응답**
+```json
+{"device":"SET_NET_RESET","conn":1,"result":1}
+```
+→ `net_mode = 1` (DHCP) 저장 후 재부팅
+
+웹 UI: **유지보수 → Flash Reset → DHCP 복귀** (최초 설정에는 사용하지 않음)
+
+### 2B.4 Flash 설정 삭제 (펌웨어 예정) — `clear_net` / `clear_broker`
+
+자체 8채널 스위치 등 **별도 제어보드**에서 저장된 IP/브로커 설정을 지우고
+`config.h` 컴파일타임 기본값으로 되돌릴 때 사용 (향후 펌웨어 구현 예정).
+
+| 명령 | Payload | 동작 (예정) |
+|------|---------|-------------|
+| LAN 설정 삭제 | `{"clear_net":1}` | Flash IP/SN/GW/DNS 삭제 → config.h 기본값 |
+| 브로커 설정 삭제 | `{"clear_broker":1}` | Flash broker_ip/port 삭제 → config.h `SHELTER_MQTT_BROKER_IP` |
+
+**Stat 응답 (예정)**
+```json
+{"device":"CLEAR_NET","conn":1,"result":1}
+{"device":"CLEAR_BROKER","conn":1,"result":1}
+```
+
+> ⚠️ `clear_*` 명령은 **자체 스위치용 별도 제어보드** 전용입니다. 메인 쉘터 제어보드는
+> `set_net` / `set_broker` / `set_net_reset`을 사용하세요.
+
+### 2B.5 안전장치 (자동 롤백)
 
 새 설정 적용 후 60초(`SHELTER_NET_ROLLBACK_TIMEOUT_MS`) 안에 MQTT 연결에 성공하지
 못하면 재부팅하며, 이런 미확정 재부팅이 3회(`SHELTER_NET_ROLLBACK_MAX_FAILS`) 누적되면
@@ -198,6 +302,85 @@ STM32 GPIOD PD4~PD7 4개 디지털 입력. `SCAN_External_Inputs()`가 매 센�
 > 보드가 멈추지 않고 안전하게 부팅됩니다.
 
 ---
+
+> Flash 저장 경로는 현장 배포 전 최소 1회 "직결 설정 → 재부팅 → MQTT ONLINE"을 확인해 주세요.
+> Flash가 비어 있거나 checksum 오류면 `NetConfig_Load()`가 `config.h` 기본값으로 대체되어
+> 보드가 멈추지 않고 안전하게 부팅됩니다.
+
+---
+
+## 2C. [v2.1] PC 이더넷 직결 프로비저닝 — **양산·현장 최초 설정 표준**
+
+MQTT 브로커에 **최초 연결하지 못한 상태**에서, PC와 이더넷 케이블로 직접 연결해
+제어보드 **내장 HTTP 페이지**로 LAN/MQTT를 설정합니다.
+
+- **XML·별도 PC 툴 불필요** — Flash에 HTML 내장
+- **펌웨어 1종** — 고객/현장별 `config.h` 재빌드 불필요
+- **설치 절차 상세:** `Protocol/Shelter_Installation_Guide.md`
+
+### 2C.1 진입 조건
+
+| 상황 | 조건 |
+|------|------|
+| 공장 / Flash 없음 | 링크 UP + IP 없음 **5초** (`SHELTER_PROV_LINKUP_MS`) 또는 MQTT **90초** 실패 |
+| Flash 있음, **재설정** (`pending=0`) | 링크 UP + IP 없음 **5초** → `192.168.0.100` |
+| **저장 직후 1회** (`pending=1`) | LAN DHCP **최대 2분** (`SHELTER_PROV_AFTER_SAVE_MS`) — PC 직결 유지 시 prov **지연** (케이블을 공유기 LAN으로 교체) |
+| 케이블 미연결 | prov 진입 **불가** — `[WAIT] Cable down` 로그 |
+
+저장 시 Flash `pending=1` → MQTT ONLINE 시 `pending=0` 확정 (`NetConfig_ConfirmBoot`).
+
+### 2C.2 IP 주소
+
+| 장치 | IP | 서브넷 | 비고 |
+|------|-----|--------|------|
+| **제어보드** | **192.168.0.100** | 255.255.255.0 | GW 192.168.0.1 (직결 전용) |
+| **PC (설정용)** | **192.168.0.10** | 255.255.255.0 | 같은 대역 unused IP 가능 |
+| **브라우저** | `http://192.168.0.100` | — | 포트 80 |
+
+### 2C.3 설정 페이지 (내장 HTML)
+
+| 항목 | 권장 (일반 현장) | 비고 |
+|------|------------------|------|
+| LAN 모드 | **DHCP** | 공유기 LAN에 연결 후 IP 자동 획득 |
+| STATIC | IP/SN/GW/DNS | 고정 IP 현장만 |
+| MQTT 브로커 IP | **관제 PC LAN IP** | 예: `192.168.0.107` |
+| MQTT 포트 | **1883** | MOS 비암호화 |
+
+**[저장 및 재부팅]** → Flash 저장 (`pending=1`) → 재부팅 → **PC 직결 해제** → 현장 LAN 연결 → MQTT 접속 → `pending=0` 확정
+
+> DHCP 모드: IP 입력란은 무시됨. 고정 IP는 **STATIC** 선택.
+
+### 2C.4 양산 공정 (권장)
+
+```
+[1] 공통 펌웨어 플래시
+[2] PC ↔ 제어보드 이더넷 직결 (90초 이내 또는 MQTT 실패 대기)
+[3] PC NIC 192.168.0.10 설정 → http://192.168.0.100
+[4] LAN=DHCP, 브로커=양산 서버 IP → 저장 및 재부팅
+[5] 현장 LAN(또는 공장 테스트 LAN) 연결 → CMS에서 uid ONLINE 확인
+[6] 라벨(UID) 부착 → 출하
+```
+
+### 2C.5 현장 설치 (설치 업체)
+
+1. 쉘터 전원 ON, 이더넷을 **관제 PC/공유기 LAN**에 연결 (직결 설정 완료 장치는 DHCP로 IP 획득)
+2. CMS 웹에서 장치 **ONLINE** 및 `uid` 확인
+3. 미연결 시: PC 직결 → 2C.2~2C.3 반복 (설치 가이드 참고)
+
+### 2C.6 공장 초기화
+
+| 방법 | 동작 |
+|------|------|
+| 물리 **SW8** | Flash erase → DHCP + config.h 기본값 |
+| MQTT `{"set_net_reset":1}` | 동일 (유지보수) |
+
+### 2C.7 운영 중 원격 변경 (선택)
+
+LAN 연결 후 **CMS 유지보수 메뉴** 또는 MQTT `set_net` / `set_broker` — 섹션 2B.
+
+---
+
+## 3. AD (릴레이 15채널)
 
 | 구분 | 토픽 |
 |------|------|
@@ -244,12 +427,14 @@ STM32 GPIOD PD4~PD7 4개 디지털 입력. `SCAN_External_Inputs()`가 매 센�
 
 | 상태 | Payload |
 |------|---------|
-| 연결 | `{"mode":"MANUAL","duty":50,"conn":1}` |
-| 미연결 | `{"fan":0,"conn":0}` |
+| 연결 | `{"mode":"MANUAL","duty":50,"rpm":1234,"conn":1}` |
+| 미연결 | `{"fan":0,"rpm":0,"conn":0}` |
 
 - `mode`: `"AUTO"` / `"MANUAL"`
 - `duty`: PWM 0~100 (%)
+- `rpm`: 타코 측정 회전수 (정수). **v2.2 추가**
 - AUTO: 내부온도 기반 자동 (0~20°C 선형)
+- **conn**: duty≥10% → 7초 내 타코 펄스; duty<10% → 60초 내 이력 (섹션 1.4)
 
 ### 4.2 Command
 
@@ -284,11 +469,30 @@ MQTT로 노출되는 PB 데이터는 Control Board가 집계·변환합니다.
 | stat | `dev/stat/pb` |
 | cmnd | `dev/cmnd/pb` |
 
+### 5.0 전원보드 ID (`b_id`)
+
+**고정값이 아닙니다.** `b_id`는 전원보드(PB) 앞단 **4개 슬라이드 DIP 스위치**로 결정되는 **4bit 보드 주소 (0~15)** 입니다.
+
+| 단계 | 동작 |
+|------|------|
+| **전원보드** | 부팅 시 `HW_Get_BoardID()` — ID1~ID4 핀 (ON=LOW → 해당 bit 1). RS485 송·수신 패킷 **byte[1]**에 ID 포함 |
+| **제어보드** | RS485 수신 → `PowerBoard_UpdateAllData()`가 패킷 byte[1]을 `dev_status.pwr_ch[].b_id`에 저장 |
+| **MQTT** | `dev/tele/pb` · `dev/stat/pb`의 `b_id` = 위에서 **학습한 실측값** |
+| **서버 → 제어** | `dev/cmnd/pb`의 `b_id`는 tele 또는 `get_pb` 응답과 **일치**해야 함 (불일치 → `result:0`) |
+
+- **쉘터 현장:** PB **1대**만 RS485 연결 (일반 구성).
+- **다보드 확장:** DIP를 달리한 PB 추가 시 버스上 `b_id`가 여러 개 공존 가능.
+- **서버 권장:** `b_id=1` 등 **하드코딩 금지** — `tele/pb` 또는 `get_pb`의 `b_id`를 캐시해 `set_pb`·개별 채널 제어에 사용.
+- **레거시:** `{"id":N,...}` — `id` ≡ `b_id`.
+
+> DIP bit: ID1=bit0(LSB), ID2=bit1, ID3=bit2, ID4=bit3(MSB). 스위치 ON(LOW)=1.  
+> 예: ID1만 ON → `b_id=1`, ID1·ID3 ON → `b_id=5`.
+
 ### 5.1 Telemetry — `dev/tele/pb`
 
 ```json
 {
-  "b_id": 1,
+  "b_id": 3,
   "pb": [
     {"ch":1,"sw":1,"c":1.14,"w":250.8,"v":220},
     {"ch":2,"sw":1,"c":1.04,"w":228.5,"v":220},
@@ -305,7 +509,7 @@ MQTT로 노출되는 PB 데이터는 Control Board가 집계·변환합니다.
 
 | 필드 | 설명 |
 |------|------|
-| `b_id` | 전원보드 ID |
+| `b_id` | 전원보드 DIP 4bit 실측 ID (**0~15**, tele/get_pb에서 확인·cmnd에 동일값 사용) |
 | `ch` | 채널 1~8 |
 | `sw` | 0=OFF, 1=ON |
 | `c` | 전류 [A] |
@@ -314,24 +518,25 @@ MQTT로 노출되는 PB 데이터는 Control Board가 집계·변환합니다.
 
 미연결: `{"pb":0,"conn":0}`
 
-> 전원보드는 1초마다 RS485 보고 → Control Board가 연결 상태 판단에 활용
+> RS485 폴링 ~0.8s, MQTT tele **10초**. 연속 10회 RS485 실패 시 conn=0. CMS는 tele 35초 stale 시 그래프 offline.
 
 ### 5.2 Command
 
 | 명령 | Payload |
 |------|---------|
-| 개별 채널 | `{"b_id":1,"ch":1,"sw":1}` |
-| 전체 일괄 | `{"b_id":1,"set_pb":"11001101"}` (8자리 0/1) |
-| 상태 조회 | `{"b_id":1,"get_pb":"state"}` |
+| 개별 채널 | `{"b_id":N,"ch":1,"sw":1}` — **N = tele/get_pb의 실측 `b_id`** |
+| 전체 일괄 | `{"b_id":N,"set_pb":"11001101"}` (8자리 0/1) |
+| 상태 조회 | `{"b_id":N,"get_pb":"state"}` |
 
 ### 5.3 Stat 응답
 
 성공: tele과 동일 + `"result":1`  
-실패: `{"b_id":1,"pb":0,"conn":1,"result":0}`
+실패: `{"b_id":N,"pb":0,"conn":1,"result":0}` — PB **온라인**이나 b_id 불일치 등 (v2.5)  
+실패(PB 미연결): `{"b_id":N,"pb":0,"conn":0,"result":0}`
 
 ---
 
-## 6. 공기청정기 (AP, Himpel)
+## 6. 공기청정기 (AP, Himpel RS485)
 
 | 구분 | 토픽 |
 |------|------|
@@ -339,29 +544,43 @@ MQTT로 노출되는 PB 데이터는 Control Board가 집계·변환합니다.
 | stat | `dev/stat/ap` |
 | cmnd | `dev/cmnd/ap` |
 
+> **통신:** Himpel 제조사 **RS485 전용 프레임** (Modbus RTU 아님). 제어보드 `himpel.c`.
+
 ### 6.1 Telemetry
 
 ```json
 {
   "pwr":1,"mode":"AUTO","spd":3,"uv":1,
   "co2":450,"pm25":15,"pm10":20,"pm1_0":10,
-  "temp":23.5,"humi":45,"filter":100,"conn":1
+  "temp":23.5,"temp_out":18.2,"humi":45,"tvoc":120,
+  "filter":100,"conn":1
 }
 ```
 
+| 필드 | 설명 |
+|------|------|
+| `temp` | 실내 온도 [°C] |
+| `temp_out` | 실외(급기) 온도 [°C] |
+| `tvoc` | TVOC [ppb] |
+| `spd` | 풍속 **0~4** (0=정지, 4=터보) |
+| `mode` | AUTO / MANUAL / CLEAN / VENT / BYPASS / HEATER |
+
 미연결: `{"ap":0,"conn":0}`
 
-### 6.2 Command (개별)
+### 6.2 Command (개별·복합)
+
+한 JSON에 **여러 필드를 동시에** 넣을 수 있습니다 (v2.4). 펌웨어는 포함된 필드를 순차 적용합니다.
 
 | Payload | 설명 |
 |---------|------|
 | `{"pwr":0}` | 전원 0/1 |
-| `{"mode":"AUTO"}` | AUTO / MANUAL |
-| `{"spd":4}` | 풍속 1~4 |
+| `{"mode":"AUTO"}` | AUTO / MANUAL / CLEAN / VENT / BYPASS / HEATER |
+| `{"spd":4}` | 풍속 **0~4** |
 | `{"uv":1}` | UV 0/1 |
 | `{"filter_reset":1}` | 필터 초기화 |
 | `{"bypass":1}` | 바이패스 |
-| `{"timer":60}` | 타이머 (분) |
+| `{"timer":60}` | 타이머 (0~255) |
+| `{"pwr":1,"mode":"AUTO","spd":2}` | 복합 예 (v2.4) |
 
 ### 6.3 Command (일괄 / 조회)
 
@@ -396,19 +615,22 @@ MQTT로 노출되는 PB 데이터는 Control Board가 집계·변환합니다.
 | `mode` | COOL / HEAT / FAN / DRY / AUTO |
 | `temp` | 설정온도 [°C] |
 | `curr` | 현재온도 [°C] |
-| `spd` | 풍속 1~4 |
+| `spd` | 풍속 **1~6** (LG 실내기 풍량 단계) |
 | `err` | 에러코드 (0=정상) |
 
 미연결: `{"ac":0,"conn":0}`
 
-### 7.2 Command
+### 7.2 Command (개별·복합)
+
+한 JSON에 **pwr·mode·temp·spd를 동시에** 지정 가능 (v2.4). 스케줄·일괄 제어는 **`set_ac`** 권장.
 
 | Payload | 설명 |
 |---------|------|
 | `{"pwr":1}` | 전원 |
-| `{"mode":"COOL"}` | 운전모드 |
-| `{"temp":26}` | 설정온도 |
-| `{"spd":3}` | 풍속 |
+| `{"mode":"COOL"}` | COOL / HEAT / FAN / DRY / AUTO |
+| `{"temp":26}` | 설정온도 16~30°C |
+| `{"spd":3}` | 풍속 **1~6** |
+| `{"pwr":1,"mode":"COOL","temp":24,"spd":2}` | 복합 예 (v2.4) |
 | `{"set_ac":{"pwr":1,"mode":"COOL","temp":26,"spd":3}}` | 일괄 |
 | `{"get_ac":"state"}` | 상태 조회 |
 
@@ -438,7 +660,10 @@ MQTT로 노출되는 PB 데이터는 Control Board가 집계·변환합니다.
 {"device":"DEV_RESET","conn":0,"result":1}
 ```
 
-→ 500ms 후 `HAL_NVIC_SystemReset()`
+→ 500ms 후 **`HAL_NVIC_SystemReset()`** (소프트 리부트, **Flash·네트워크 설정 유지**)
+
+> **주의:** Flash·DHCP **공장 초기화**는 **`{"set_net_reset":1}`** (섹션 2B) — DEV_RESET과 다름.  
+> (v2.5 이전 펌웨어는 DEV_RESET이 Flash erase였음 — **반드시 v2.5+ 펌웨어 사용**)
 
 ### 8.2 전체 데이터 요청 (ALL_DATA)
 
@@ -460,9 +685,9 @@ MQTT로 노출되는 PB 데이터는 Control Board가 집계·변환합니다.
 | `dev/tele/th_out` | `{"temp":23.3,"humi":20.6,"conn":1}` |
 | `dev/tele/dust` | `{"pm1_0":41,"pm2_5":54,"pm10":55,"conn":1}` |
 | `dev/tele/ad` | `{"relays":[0,0,...],"conn":1}` |
-| `dev/tele/fan` | `{"mode":"AUTO","duty":100,"conn":1}` |
+| `dev/tele/fan` | `{"mode":"AUTO","duty":100,"rpm":2100,"conn":1}` |
 | `dev/tele/ac` | `{"pwr":0,"mode":"COOL","temp":24.0,"curr":0.0,"spd":1,"err":0,"conn":0}` |
-| `dev/tele/pb` | `{"b_id":1,"pb":[...],"conn":1}` |
+| `dev/tele/pb` | `{"b_id":N,"pb":[...],"conn":1}` — **N** = DIP 실측 |
 | `dev/tele/ap` | AP tele 형식 |
 
 > 서버 최초 연결·갱신 시 사용. 발행 후 10분 타이머 리셋.
@@ -479,12 +704,19 @@ MQTT로 노출되는 PB 데이터는 Control Board가 집계·변환합니다.
 | # | 규칙 | 설명 |
 |---|------|------|
 | R1 | 최초 전원 인가 | 각 장비 탐색 → 연결/미연결 형식으로 1회 즉시 발행 → 10분 주기 시작 |
-| R2 | 10분 정기 보고 | tele 토픽 순차 발행. PB는 RS485 1초 + MQTT 집계 |
-| R3 | 센서 재연결 | 연결 감지 시 1회 즉시 발행 + 10분 타이머 리셋 |
-| R4 | 브로커 재연결 | 복구 후 전체 1회 발행 + 타이머 리셋. `ALL_DATA`로 강제 갱신 가능 |
-| R5 | result 규칙 | 성공=1+현재상태, 실패=0+기존유지, 범위초과=0 |
-| R6 | LWT | 비정상 종료 → `dev/tele/state`에 OFFLINE |
-| R7 | 명령 후 타이머 리셋 | stat 응답 성공 시 해당 장비 10분 카운트 리셋 |
+| R2 | 10분 정기 보고 | tele 토픽 순차 발행. PB는 RS485 ~0.8s 폴링 + MQTT **10초** | |
+| R3 | 센서 재연결 | 연결 감지 시 1회 즉시 발행 + 10분 타이머 리셋 | |
+| R4 | 브로커 재연결 | 복구 후 전체 1회 발행 + 타이머 리셋. `ALL_DATA`로 강제 갱신 가능 | |
+| R5 | result 규칙 | 성공=1+현재상태, 실패=0+기존유지, 범위초과=0 | |
+| R6 | LWT | 비정상 종료 → `dev/tele/state`에 OFFLINE | |
+| R7 | 명령 후 타이머 리셋 | stat 응답 성공 시 해당 장비 10분 카운트 리셋 | |
+| **R10** | **conn 독립 (v2.2)** | **장치별 tele `conn`만 UI 반영. 메인보드 MQTT 수신 ≠ 전체 연결됨** | CMS `server.js` |
+| **R11** | **CMS 메인 타임아웃** | **5분간 보드 MQTT 없음 → state OFFLINE + 하위 conn 0 (pb 제외 키)** | `DEVICE_TIMEOUT_MS` |
+| **R12** | **장치별 conn** | dust 60s / fan 타코 7s·60s / PB RS485×10 / AC discrete / AP 10s — **섹션 1.4** | 펌웨어 |
+| **R13** | **복합 cmnd (v2.4)** | AC/AP cmnd JSON에 여러 키 동시 포함 시 **포함 필드 모두 순차 적용**. 일괄은 `set_ac`/`set_ap` 권장 | `mqtt_handler.c` |
+| **R14** | **tele vs stat (v2.4)** | **`result`는 stat 전용**. tele/pb 등 tele 토픽에는 `result` 없음 | `app.c`, CMS |
+| **R15** | **PB b_id (v2.4)** | 서버 `b_id` **하드코딩 금지**. tele 수신 전 PB cmnd·스케줄 PB **생략** (`lastPbDataValid`) | `server.js` |
+| **R16** | **PB 릴레이 순차 (v2.5)** | 전원보드 0xAA 처리: 채널당 상태 변경 시 **200ms** (돌입전류 방지) | `power_board/code/app.c` |
 
 ---
 
@@ -518,9 +750,10 @@ MQTT로 노출되는 PB 데이터는 Control Board가 집계·변환합니다.
 | AD stat `relays` | 배열 | ⚠️ **문자열** `"1000…"` | `mqtt_handler.c` L90 — **수정 필요** |
 | Fan cmnd 토픽 | `dev/cmnd/fan` | ✅ 동작 | `dev/cmnd/#` 구독으로 수용. 별도 `fan/duty`, `fan/get` 정의는 레거시 |
 | PB cmnd | `set_pb`, `get_pb` | ✅ 일치 | `mqtt_handler.c` |
-| AP/AC 개별 cmnd | `dev/cmnd/ap`, `/ac` | ✅ 동작 | 페이로드 기반 파싱. `/power`, `/mode` 등 토픽도 정의됨 |
-| DEV reset | `{"reset":"DEV_RESET"}` | ✅ 일치 | |
-| DEV ALL_DATA | `{"data":"ALL_DATA"}` | ⚠️ PB tele JSON | `mqtt_handler.c` L507~517 **JSON 구조 오류** |
+| AP/AC 개별 cmnd | `dev/cmnd/ap`, `/ac` | ✅ 동작 | v2.4: 한 JSON 다필드 지원. `/power`, `/mode` 서브토픽은 레거시 |
+| PB tele `result` | tele에 없음, stat만 | ✅ v2.4 일치 | `app.c` tele/pb |
+| CMS PB 파싱 | `pb[]` 배열 기준 | ✅ v2.4 | `server.js` — `result` 불필요 |
+| DEV ALL_DATA | `{"data":"ALL_DATA"}` | ✅ 일치 | tele 9종 일괄 발행 |
 | ONLINE payload | `conn:1` 포함 | ⚠️ `conn` 없음 | `app.c` L379 — 선택적 |
 | 브로커 IP 변경 | `set_broker` (v2.0) | ✅ 구현 완료 | 섹션 2B |
 | 외부 입력 4채널 | `dev/tele/input` (v2.0) | ✅ 구현 완료 (기존엔 죽은 코드) | 섹션 2A |
@@ -532,8 +765,8 @@ MQTT로 노출되는 PB 데이터는 Control Board가 집계·변환합니다.
 
 ```
 dev/0008DC77631F/cmnd/pb/power     →  dev/cmnd/pb
-{"ch":1,"pwr":"ON"}                →  {"b_id":1,"ch":1,"sw":1}
-{"pwr_all":"11001100"}             →  {"b_id":1,"set_pb":"11001100"}
+{"ch":1,"pwr":"ON"}                →  {"b_id":N,"ch":1,"sw":1}   (N=tele 실측 b_id)
+{"pwr_all":"11001100"}             →  {"b_id":N,"set_pb":"11001100"}
 {"device":"ALL_DATA"}              →  {"data":"ALL_DATA"}
 {"device":"RESET"}                 →  {"reset":"DEV_RESET"}
 ```
@@ -546,9 +779,9 @@ dev/0008DC77631F/cmnd/pb/power     →  dev/cmnd/pb
 # 브로커 구독 (전체 tele)
 mosquitto_sub -h 192.168.0.100 -p 1883 -t "dev/tele/#" -v
 
-# PB 채널 1 ON
+# PB 채널 1 ON (N을 tele/pb의 b_id로 교체)
 mosquitto_pub -h 192.168.0.100 -t "dev/cmnd/pb" \
-  -m '{"b_id":1,"ch":1,"sw":1}'
+  -m '{"b_id":3,"ch":1,"sw":1}'
 
 # AP 일괄 설정
 mosquitto_pub -h 192.168.0.100 -t "dev/cmnd/ap" \
@@ -586,7 +819,7 @@ mosquitto_pub -h 192.168.0.100 -t "dev/cmnd/dev" \
 | 항목 | 내용 |
 |------|------|
 | 외부 입력 4채널 | PD4~PD7 스캔 로직이 **어디서도 호출되지 않던 죽은 코드**였음(입력이 절대 갱신 안 됨) → 센서 태스크에 연결, 상승엣지 카운트 + 변경 시 즉시 발행 추가. 섹션 2A |
-| STATIC IP / 브로커 EEPROM 저장 | `net_config.c` 신규 (25LC256 EEPROM), 웹서버 "네트워크 설정" 화면에서 변경. 섹션 2B |
+| STATIC IP / 브로커 Flash 저장 | `net_config.c` 신규 (내부 Flash), CMS 유지보수 화면에서 변경. 섹션 2B |
 | `tele/state`에 `ip`/`mode` 필드 | 현재 실제 접속 IP·모드를 웹 UI에 노출하기 위함 |
 | 자동 롤백 | 네트워크/브로커 설정 오입력 시 자동으로 이전 정상값 복구 (섹션 2B.3) |
 
@@ -607,6 +840,44 @@ mosquitto_pub -h 192.168.0.100 -t "dev/cmnd/dev" \
 
 > 위 표의 #1, #2는 **현장 로그로 근거가 확인된 원인**입니다. 다만 40분 주기 드롭이
 > 100% 재현 불가한 상황이었던 만큼, 패치 이후에도 계속 모니터링이 필요합니다.
+
+---
+
+## 부록 D — v2.1 변경 사항 (2026-08-12)
+
+| 항목 | 내용 |
+|------|------|
+| 직결 프로비저닝 | MQTT 90s 미연결 + 링크 UP → `192.168.0.100:80` HTTP 설정 페이지 (`prov_config.c`) |
+| 양산 표준 | 펌웨어 1종 + PC 직결 최초 설정. `config.h`는 Flash empty fallback |
+| CMS UI | 네트워크 메뉴 → **유지보수** 역할 (최초 설정은 직결 HTTP) |
+| 설치 가이드 | `Shelter_Installation_Guide.md` 신규 |
+| Flash 저장 | LAN 모드(DHCP/STATIC) + 브로커 — `NetConfig_SaveAndApplyEx()` |
+
+---
+
+## 부록 E — v2.4 변경 사항 (2026-08-13)
+
+| 항목 | 내용 |
+|------|------|
+| AP tele | `temp_out`, `tvoc` 필드 추가. mode: CLEAN/VENT/BYPASS/HEATER. spd **0~4** |
+| AC spd | LG 풍량 **1~6** (문서·펌웨어 정합) |
+| tele/pb | **`result` 제거** — stat/pb만 `result` 포함 |
+| 복합 cmnd | AC/AP: 한 JSON에 pwr+mode+temp 등 **다필드 동시 전송** 지원 |
+| CMS | PB tele `pb[]` 기준 파싱, `current_b_id` 초기 **0**, 출근 스케줄 `set_ac`/`set_ap` |
+| Himpel | 규격·엑셀 표기 **RS485** (Modbus 아님) |
+
+---
+
+## 부록 F — v2.5 변경 사항 (2026-08-13)
+
+| 항목 | 내용 |
+|------|------|
+| DEV_RESET | **소프트 리부트** (`HAL_NVIC_SystemReset`) — Flash·네트워크 유지. 공장 초기화는 `set_net_reset` |
+| PB 펌웨어 | 0xAA 릴레이 순차 간격 **200ms** (기존 2000ms 오류 수정) |
+| stat/pb 실패 | PB 온라인·b_id 불일치: `conn:1, result:0` / PB 미연결: `conn:0, result:0` |
+| CMS PB | `lastPbDataValid`·`isPbCmdReady()` — tele로 b_id 학습 전 PB cmnd·스케줄 PB 생략 |
+| 환경센서 | UP-DM010UB(UART), HC-SD(th_in, I2C), CWT TH03S(th_out, Modbus) — 오프라인 시 동일 스키마 + `conn:0` |
+| CMS UI | PB DIP ID 표시, AP `humi`, 팬 RPM, PB 낙관적 UI `{ch,sw}` |
 
 ---
 

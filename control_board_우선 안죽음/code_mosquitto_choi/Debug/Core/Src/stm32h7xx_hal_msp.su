@@ -1,0 +1,12 @@
+../Core/Src/stm32h7xx_hal_msp.c:65:6:HAL_MspInit	16	static
+../Core/Src/stm32h7xx_hal_msp.c:89:6:HAL_I2C_MspInit	264	static
+../Core/Src/stm32h7xx_hal_msp.c:209:6:HAL_I2C_MspDeInit	16	static
+../Core/Src/stm32h7xx_hal_msp.c:280:6:HAL_RTC_MspInit	208	static
+../Core/Src/stm32h7xx_hal_msp.c:314:6:HAL_RTC_MspDeInit	16	static
+../Core/Src/stm32h7xx_hal_msp.c:336:6:HAL_SPI_MspInit	248	static
+../Core/Src/stm32h7xx_hal_msp.c:419:6:HAL_SPI_MspDeInit	16	static
+../Core/Src/stm32h7xx_hal_msp.c:468:6:HAL_TIM_Base_MspInit	48	static
+../Core/Src/stm32h7xx_hal_msp.c:503:6:HAL_TIM_MspPostInit	40	static
+../Core/Src/stm32h7xx_hal_msp.c:535:6:HAL_TIM_Base_MspDeInit	16	static
+../Core/Src/stm32h7xx_hal_msp.c:567:6:HAL_UART_MspInit	288	static
+../Core/Src/stm32h7xx_hal_msp.c:827:6:HAL_UART_MspDeInit	16	static

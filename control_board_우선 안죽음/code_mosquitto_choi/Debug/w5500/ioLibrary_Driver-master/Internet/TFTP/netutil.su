@@ -1,0 +1,9 @@
+../w5500/ioLibrary_Driver-master/Internet/TFTP/netutil.c:12:9:inet_ntoa	24	static
+../w5500/ioLibrary_Driver-master/Internet/TFTP/netutil.c:26:9:inet_ntoa_pad	24	static
+../w5500/ioLibrary_Driver-master/Internet/TFTP/netutil.c:39:10:inet_addr	64	static
+../w5500/ioLibrary_Driver-master/Internet/TFTP/netutil.c:68:10:swaps	24	static
+../w5500/ioLibrary_Driver-master/Internet/TFTP/netutil.c:81:10:swapl	24	static
+../w5500/ioLibrary_Driver-master/Internet/TFTP/netutil.c:96:10:htons	16	static
+../w5500/ioLibrary_Driver-master/Internet/TFTP/netutil.c:111:10:htonl	16	static
+../w5500/ioLibrary_Driver-master/Internet/TFTP/netutil.c:127:10:ntohs	16	static
+../w5500/ioLibrary_Driver-master/Internet/TFTP/netutil.c:142:10:ntohl	16	static

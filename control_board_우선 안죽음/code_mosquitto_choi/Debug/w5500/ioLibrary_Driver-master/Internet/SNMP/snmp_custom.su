@@ -1,0 +1,2 @@
+../w5500/ioLibrary_Driver-master/Internet/SNMP/snmp_custom.c:123:6:initTable	4	static
+../w5500/ioLibrary_Driver-master/Internet/SNMP/snmp_custom.c:168:6:initial_Trap	200	static

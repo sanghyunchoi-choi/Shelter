@@ -1,0 +1,3 @@
+../Core/Src/phri/hcsd.c:7:20:hcsd_Init	1
+../Core/Src/phri/hcsd.c:19:9:hcsd_UpdateValue	3
+../Core/Src/phri/hcsd.c:50:6:hcsd_GetTemperatureAndHumidity	2

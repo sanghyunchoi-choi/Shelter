@@ -1,5 +1,7 @@
 #include "app.h"
-#include <ds3231m.h> // _RTC 타입을 위해 포함
+#include "FreeRTOS.h"
+#include "task.h"
+#include <ds3231m.h>
 #include "sntp.h"
 #include "dns.h"
 #include "socket.h"
@@ -126,13 +128,15 @@ void RLY_SetStatus(uint8_t ch, bool state)
         return;
     }
 
-    // 1. 물리적 핀 제어 (High Active 기준, 회로에 따라 RESET/SET 반전 가능)
     HAL_GPIO_WritePin(RLY_MAP[ch - 1].port, RLY_MAP[ch - 1].pin, state ? GPIO_PIN_SET : GPIO_PIN_RESET);
 
-    // 2. [중요] 전역 상태 구조체 업데이트
-    osMutexAcquire(mqtt_mutex_id, osWaitForever);
-    dev_status.relay.ch[ch - 1] = state;
-    osMutexRelease(mqtt_mutex_id);
+    /* MQTT 콜백(MQTTYield 내부)에서 osWaitForever → 전체 보드 deadlock 방지 */
+    if (osMutexAcquire(mqtt_mutex_id, 100) == osOK) {
+        dev_status.relay.ch[ch - 1] = state;
+        osMutexRelease(mqtt_mutex_id);
+    } else {
+        dev_status.relay.ch[ch - 1] = state;
+    }
 }
 
 // 릴레이 개별 상태 읽기 (ch: 1~15)
@@ -201,23 +205,10 @@ void SCAN_External_Inputs(void)
 
 void Execute_Factory_Reset_And_Reboot(void)
 {
-    printf("\r\n[FACTORY-RESET] 팩토리 리셋 시퀀스 가동! 설정을 완전 지우고 DHCP 모드로 복귀합니다.\r\n");
-    osDelay(100); // 시리얼 로그가 버퍼를 통해 터미널에 뿌려질 수 있는 최소한의 시간 제공
-
-    // 1. [RTOS 가드] 플래시를 제어하는 동안 태스크가 스위칭되는 것을 방지하기 위해 스케줄러 정지
-    vTaskSuspendAll();
-
-    // 2. [인터럽트 가드] 쓰기/지우기 타이밍에 인터럽트가 치고 들어와 칩이 얼어버리는 증상 방지
-    __disable_irq();
-
-    // 3. [핵심] 내장 Flash의 설정 영역 섹터를 완전히 초기화(0xFF) 상태로 지워버립니다.
+    osDelay(100);
+    /* NetConfig_ExecuteFlashEraseAndReboot 내부에서 스케줄러/IRQ 차단 + Erase + SystemReset 수행 */
     NetConfig_ExecuteFlashEraseAndReboot();
-
-    // 4. [완전 리셋] 하드웨어가 다시 켜지면서 플래시가 비어있음을 확인하고 DHCP로 켜지도록 강제 재부팅 수행
-    HAL_NVIC_SystemReset();
-
-    // 리셋이 실행되면 이 아래 코드는 실행되지 않습니다.
-    while(1);
+    while (1);
 }
 
 

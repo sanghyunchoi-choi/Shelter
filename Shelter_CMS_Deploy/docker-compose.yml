@@ -1,0 +1,26 @@
+# Smart Shelter CMS 배포용 — 사전 빌드 Docker 이미지만 사용 (소스 코드 불포함)
+# install.bat 이 images/*.tar 를 docker load 한 뒤 기동합니다.
+
+services:
+  mosquitto:
+    image: shelter-mosquitto-local:2.0
+    container_name: shelter-mosquitto
+    ports:
+      - "1883:1883"
+    restart: always
+
+  shelter-web:
+    image: shelter-web-local:2.0
+    container_name: shelter-web-local
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - MQTT_BROKER=mqtt://mosquitto:1883
+      - SERVER_LAN_IP=${SERVER_LAN_IP}
+    env_file:
+      - path: .env
+        required: false
+    depends_on:
+      - mosquitto
+    restart: always

@@ -1,0 +1,3 @@
+# Force serial build even when STM32CubeIDE invokes "make -j12 all".
+# Fixes Windows "can't create *.o: Invalid argument" with parallel jobs + path containing ')'.
+.NOTPARALLEL:

@@ -3,20 +3,20 @@ Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2/cmsis_os2.o: \
  ../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2/cmsis_os2.h \
  ../Drivers/CMSIS/Include/cmsis_compiler.h \
  ../Drivers/CMSIS/Include/cmsis_gcc.h \
- D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/Middlewares/Third_Party/FreeRTOS/Source/include/FreeRTOS.h \
+ ../Middlewares/Third_Party/FreeRTOS/Source/include/FreeRTOS.h \
  ../Core/Inc/FreeRTOSConfig.h \
- D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/Middlewares/Third_Party/FreeRTOS/Source/include/projdefs.h \
- D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/Middlewares/Third_Party/FreeRTOS/Source/include/portable.h \
- D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/Middlewares/Third_Party/FreeRTOS/Source/include/deprecated_definitions.h \
- D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/Middlewares/Third_Party/FreeRTOS/Source/portable/GCC/ARM_CM4F/portmacro.h \
- D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/Middlewares/Third_Party/FreeRTOS/Source/include/mpu_wrappers.h \
- D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/Middlewares/Third_Party/FreeRTOS/Source/include/task.h \
- D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/Middlewares/Third_Party/FreeRTOS/Source/include/list.h \
- D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/Middlewares/Third_Party/FreeRTOS/Source/include/event_groups.h \
- D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/Middlewares/Third_Party/FreeRTOS/Source/include/timers.h \
- D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/Middlewares/Third_Party/FreeRTOS/Source/include/task.h \
- D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/Middlewares/Third_Party/FreeRTOS/Source/include/semphr.h \
- D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/Middlewares/Third_Party/FreeRTOS/Source/include/queue.h \
+ ../Middlewares/Third_Party/FreeRTOS/Source/include/projdefs.h \
+ ../Middlewares/Third_Party/FreeRTOS/Source/include/portable.h \
+ ../Middlewares/Third_Party/FreeRTOS/Source/include/deprecated_definitions.h \
+ ../Middlewares/Third_Party/FreeRTOS/Source/portable/GCC/ARM_CM4F/portmacro.h \
+ ../Middlewares/Third_Party/FreeRTOS/Source/include/mpu_wrappers.h \
+ ../Middlewares/Third_Party/FreeRTOS/Source/include/task.h \
+ ../Middlewares/Third_Party/FreeRTOS/Source/include/list.h \
+ ../Middlewares/Third_Party/FreeRTOS/Source/include/event_groups.h \
+ ../Middlewares/Third_Party/FreeRTOS/Source/include/timers.h \
+ ../Middlewares/Third_Party/FreeRTOS/Source/include/task.h \
+ ../Middlewares/Third_Party/FreeRTOS/Source/include/semphr.h \
+ ../Middlewares/Third_Party/FreeRTOS/Source/include/queue.h \
  ../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2/freertos_mpool.h \
  ../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2/freertos_os2.h \
  ../Drivers/CMSIS/Device/ST/STM32H7xx/Include/stm32h7xx.h \
@@ -57,20 +57,20 @@ Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2/cmsis_os2.o: \
 ../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2/cmsis_os2.h:
 ../Drivers/CMSIS/Include/cmsis_compiler.h:
 ../Drivers/CMSIS/Include/cmsis_gcc.h:
-D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/Middlewares/Third_Party/FreeRTOS/Source/include/FreeRTOS.h:
+../Middlewares/Third_Party/FreeRTOS/Source/include/FreeRTOS.h:
 ../Core/Inc/FreeRTOSConfig.h:
-D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/Middlewares/Third_Party/FreeRTOS/Source/include/projdefs.h:
-D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/Middlewares/Third_Party/FreeRTOS/Source/include/portable.h:
-D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/Middlewares/Third_Party/FreeRTOS/Source/include/deprecated_definitions.h:
-D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/Middlewares/Third_Party/FreeRTOS/Source/portable/GCC/ARM_CM4F/portmacro.h:
-D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/Middlewares/Third_Party/FreeRTOS/Source/include/mpu_wrappers.h:
-D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/Middlewares/Third_Party/FreeRTOS/Source/include/task.h:
-D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/Middlewares/Third_Party/FreeRTOS/Source/include/list.h:
-D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/Middlewares/Third_Party/FreeRTOS/Source/include/event_groups.h:
-D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/Middlewares/Third_Party/FreeRTOS/Source/include/timers.h:
-D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/Middlewares/Third_Party/FreeRTOS/Source/include/task.h:
-D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/Middlewares/Third_Party/FreeRTOS/Source/include/semphr.h:
-D:/2026.05.08/2025_project/2)smarttech/Project/Shelter/2026.05.25_final/MOS_version/control_board/code_mosquitto_choi/Middlewares/Third_Party/FreeRTOS/Source/include/queue.h:
+../Middlewares/Third_Party/FreeRTOS/Source/include/projdefs.h:
+../Middlewares/Third_Party/FreeRTOS/Source/include/portable.h:
+../Middlewares/Third_Party/FreeRTOS/Source/include/deprecated_definitions.h:
+../Middlewares/Third_Party/FreeRTOS/Source/portable/GCC/ARM_CM4F/portmacro.h:
+../Middlewares/Third_Party/FreeRTOS/Source/include/mpu_wrappers.h:
+../Middlewares/Third_Party/FreeRTOS/Source/include/task.h:
+../Middlewares/Third_Party/FreeRTOS/Source/include/list.h:
+../Middlewares/Third_Party/FreeRTOS/Source/include/event_groups.h:
+../Middlewares/Third_Party/FreeRTOS/Source/include/timers.h:
+../Middlewares/Third_Party/FreeRTOS/Source/include/task.h:
+../Middlewares/Third_Party/FreeRTOS/Source/include/semphr.h:
+../Middlewares/Third_Party/FreeRTOS/Source/include/queue.h:
 ../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2/freertos_mpool.h:
 ../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2/freertos_os2.h:
 ../Drivers/CMSIS/Device/ST/STM32H7xx/Include/stm32h7xx.h:

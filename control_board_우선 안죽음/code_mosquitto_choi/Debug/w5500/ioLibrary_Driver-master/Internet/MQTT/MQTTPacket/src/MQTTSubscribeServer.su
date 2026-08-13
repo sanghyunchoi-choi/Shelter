@@ -1,0 +1,2 @@
+../w5500/ioLibrary_Driver-master/Internet/MQTT/MQTTPacket/src/MQTTSubscribeServer.c:35:5:MQTTDeserialize_subscribe	48	static
+../w5500/ioLibrary_Driver-master/Internet/MQTT/MQTTPacket/src/MQTTSubscribeServer.c:83:5:MQTTSerialize_suback	40	static

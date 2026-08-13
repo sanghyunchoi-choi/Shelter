@@ -1,14 +1,17 @@
 /**
  * @file config.h
- * @brief Smart Shelter 제어보드 — 네트워크·MQTT 기본 설정 (빌드 전 여기만 수정)
+ * @brief Smart Shelter 제어보드 — 공장 기본값 (런타임 설정은 Flash / 직결 HTTP)
  *
+ * ★ 양산: 펌웨어 1종 빌드 → PC 직결 http://192.168.0.100 에서 LAN·브로커 설정 (섹션 2C)
+ * ★ 아래 값은 Flash가 비어 있을 때만 쓰이는 공장 출하 기본값입니다.
  * IP는 모두 {a, b, c, d} 형식 한 줄입니다.
  */
 #ifndef SHELTER_CONFIG_H
 #define SHELTER_CONFIG_H
 
 /* =============================================================================
- * 1) LAN 모드 — 아래 둘 중 하나만 1
+ * 1) LAN 모드 — 공장 출하 기본: DHCP (현장 LAN에서 IP 자동 획득)
+ *    STATIC/DHCP 최종 모드는 직결 HTTP 또는 Flash 저장값이 우선합니다.
  * ============================================================================= */
 #define SHELTER_NET_USE_STATIC   0
 #define SHELTER_NET_USE_DHCP     1
@@ -17,7 +20,7 @@
 #error "config.h: STATIC 또는 DHCP 중 정확히 하나만 1"
 #endif
 
-/* Static일 때만 사용 (DHCP면 무시됨) */
+/* Static일 때 Flash/직결 설정 없을 때만 사용 */
 #define SHELTER_NET_IP           {192, 168, 0, 50}			// 제어 보드 IP
 #define SHELTER_NET_SUBNET       {255, 255, 255, 0}
 #define SHELTER_NET_GATEWAY      {192, 168, 0, 1}
@@ -35,7 +38,7 @@
 #define SHELTER_DHCP_SOCKET_NUM  3
 
 /* =============================================================================
- * 2) MQTT 브로커 (제어보드가 접속하는 PC/서버)
+ * 2) MQTT 브로커 — Flash/직결 설정 없을 때만 사용하는 공장 기본값
  * ============================================================================= */
 //#define SHELTER_MQTT_BROKER_IP   {192, 168, 50, 220}
 //#define SHELTER_MQTT_BROKER_IP   {192, 168, 50, 177}
@@ -43,14 +46,25 @@
 #define SHELTER_MQTT_BROKER_PORT 1883
 
 /* =============================================================================
- * 2-1) [v2.0 신규] STATIC IP / 브로커 설정 EEPROM 저장 + 자동 복구(Rollback)
- *  ★ DHCP 콜백 로직(위 1번)은 절대 건드리지 않습니다. 여기서 EEPROM으로
- *    런타임 변경되는 것은 "STATIC일 때 쓸 IP값"과 "브로커 IP/포트" 뿐입니다.
- *    (위의 SHELTER_NET_IP 등은 EEPROM이 비어있을 때만 쓰이는 최초 기본값)
+ * 2-1) Flash 저장 + 자동 롤백 (내부 Flash Bank2 Sector7, net_config.c)
  * ============================================================================= */
 #define SHELTER_NET_EEPROM_BASE_ADDR    0x0000
 #define SHELTER_NET_ROLLBACK_MAX_FAILS  3
 #define SHELTER_NET_ROLLBACK_TIMEOUT_MS 60000U
+
+/* =============================================================================
+ * 2-2) [v2.1] PC 직결 프로비저닝 — 기본 IP 192.168.0.100
+ *  PC NIC 예: 192.168.0.10 / 255.255.255.0 → 브라우저 http://192.168.0.100
+ * ============================================================================= */
+#define SHELTER_PROV_IP           {192, 168, 0, 100}
+#define SHELTER_PROV_SUBNET       {255, 255, 255, 0}
+#define SHELTER_PROV_GATEWAY      {192, 168, 0, 1}
+#define SHELTER_PROV_DNS          {8, 8, 8, 8}
+#define SHELTER_PROV_TRIGGER_MS           90000U   /* Flash 없음: MQTT 실패 후 prov */
+#define SHELTER_PROV_LINKUP_MS            5000U    /* 재설정·공장: 링크 UP → prov (5초) */
+#define SHELTER_PROV_AFTER_SAVE_MS       120000U   /* 저장 직후 1회: LAN DHCP 유예 2분 */
+#define SHELTER_PROV_AFTER_SAVE_DEADLINE_MS 180000U /* 저장 직후 1회: prov fallback 3분 */
+#define SHELTER_HTTP_SOCKET_NUM   4        /* MQTT=0 SNTP=1 DNS=2 DHCP=3 HTTP=4 */
 
 /* =============================================================================
  * 기타
@@ -63,6 +77,7 @@
 #define SHELTER_RS485_TURNAROUND_MS   3    /* TX 후 DE→RX 전환 대기 */
 #define SHELTER_RS485_ACK_RETRY_MS    50   /* 1회 대기 간격 */
 #define SHELTER_RS485_ACK_RETRIES     20   /* 총 ~1s (수동 테스트보다 여유) */
+#define SHELTER_RS485_OFFLINE_RETRIES 4    /* 미연결 장치: ~200ms 후 포기 (태스크 블로킹 방지) */
 #define SHELTER_RS485_DEBUG_LOG       0    /* 1=[AP]/[AC] TX·RX·timeout 등 alive-check 로그 */
 #define SHELTER_RS485_LOG_EACH_BYTE   0    /* 1=UART ISR 바이트별 로그 (SHELTER_RS485_DEBUG_LOG=1 일 때만 의미) */
 

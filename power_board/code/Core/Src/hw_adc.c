@@ -10,9 +10,12 @@ float g_adc_offset[ADC_CH_COUNT] = {
     2.5f, 2.5f, 2.5f, 2.5f, 2.5f, 2.5f, 2.5f, 2.5f
 };
 
-/* 릴레이 ON · 무부하 잔류 전류 보정 (mA, 실측값) */
+/*
+ * 릴레이 ON · 무부하 잔류 전류 보정 (mA)
+ * ACS712-20A 실측값 × (100/185) 초기값 — 05B 교체 후 UART 로그로 재보정 권장
+ */
 const int16_t g_relay_noise_offset[ADC_CH_COUNT] = {
-    380, 360, 260, 450, 370, 400, 330, 190
+    205, 195, 140, 245, 200, 215, 180, 105
 };
 
 /**
@@ -105,8 +108,8 @@ int16_t HW_Get_Current_mA(uint8_t ch_idx, uint8_t is_relay_on)
         current_ma = 0.0f;
     }
 
-    if (current_ma > 32767.0f) {
-        current_ma = 32767.0f;
+    if (current_ma > (float)SENSOR_MAX_CURRENT_MA) {
+        current_ma = (float)SENSOR_MAX_CURRENT_MA;
     }
 
     return (int16_t)(current_ma + 0.5f);

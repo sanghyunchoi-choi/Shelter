@@ -1,0 +1,111 @@
+#include "modbus_lg.h"
+#include "app.h"
+#include "crc.h"
+#include <string.h>
+
+static MODBUS_SM _nextState = MODBUS_SM_SLAVE_ID;
+static uint8_t  _dataBuf[256], _dataIndex = 0, _dataCountMax = 0, _cntInStat = 0;
+static uint8_t  _lastRecvBuf[256], _lastRecvLen = 0;
+static volatile uint8_t _received = 0;
+
+/* [송신] RS485 방향 제어 포함 전송 */
+static void ModbusRawSend(uint8_t* data, uint16_t len) {
+    HAL_GPIO_WritePin(RTX_DIR4_GPIO_Port, RTX_DIR4_Pin, GPIO_PIN_SET);
+    HAL_UART_Transmit(&huart4, data, len, 100);
+    while (__HAL_UART_GET_FLAG(&huart4, UART_FLAG_TC) == RESET);
+    HAL_GPIO_WritePin(RTX_DIR4_GPIO_Port, RTX_DIR4_Pin, GPIO_PIN_RESET);
+}
+
+/* [수신] 상태 머신 인터럽트 입력 */
+void ModbusSmInput(uint8_t input) {
+    _dataBuf[_dataIndex++] = input;
+    switch (_nextState) {
+        case MODBUS_SM_SLAVE_ID:  if(input == MODBUS_SLAVE_ID) _nextState = MODBUS_SM_FUNC_CODE; else _dataIndex = 0; break;
+        case MODBUS_SM_FUNC_CODE: _nextState = (input < 0x05) ? MODBUS_SM_BYTE_COUNT : MODBUS_SM_ADDRESS; break;
+        case MODBUS_SM_BYTE_COUNT: _dataCountMax = input; _cntInStat = 0; _nextState = MODBUS_SM_DATA; break;
+        case MODBUS_SM_ADDRESS:   if(++_cntInStat == 2) { _dataCountMax = 2; _cntInStat = 0; _nextState = MODBUS_SM_DATA; } break;
+        case MODBUS_SM_DATA:      if(++_cntInStat == _dataCountMax) { _cntInStat = 0; _nextState = MODBUS_SM_CRC; } break;
+        case MODBUS_SM_CRC:       if(++_cntInStat == 2) {
+                                      memcpy(_lastRecvBuf, _dataBuf, _dataIndex);
+                                      _lastRecvLen = _dataIndex; _received = 1;
+                                      _nextState = MODBUS_SM_SLAVE_ID; _dataIndex = 0;
+                                  } break;
+    }
+}
+
+/* [엔진] Modbus 패킷 조립 및 전송 */
+int ModbusRequest(uint8_t func, uint16_t addr, uint16_t val) {
+    uint8_t tx[8]; uint16_t crc;
+    tx[0] = MODBUS_SLAVE_ID; tx[1] = func;
+    tx[2] = addr >> 8; tx[3] = addr & 0xFF;
+    tx[4] = val >> 8;  tx[5] = val & 0xFF;
+    crc = crc_modbus(tx, 6); tx[6] = crc & 0xFF; tx[7] = crc >> 8;
+
+    _received = 0; ModbusRawSend(tx, 8);
+    for (int i=0; i<10; i++) { osDelay(50); if(_received) return 0; }
+    return -1;
+}
+
+/* [파싱] 이미지 규격 데이터 매핑 */
+void ModbusParse(uint16_t start_addr, uint8_t func) {
+    uint8_t *d = &_lastRecvBuf[3]; // [ID][Func][ByteCount][Data...]
+    if (osMutexAcquire(mqtt_mutex_id, 200) != osOK) return;
+
+    if (func == FUNC_READ_COIL) {
+        strcpy(dev_status.ac.pwr, (d[0] & 0x01) ? "ON" : "OFF");
+    }
+    else if (func == FUNC_READ_INPUT) {
+        if (start_addr == ADDR_INDOOR_TEMP) {
+            dev_status.ac.temp_curr = (float)((d[0] << 8) | d[1]) / 10.0f;
+        } else if (start_addr == ADDR_ERROR_CODE) {
+            dev_status.ac.error_code = (uint16_t)((d[0] << 8) | d[1]);
+        }
+    }
+    else if (func == FUNC_READ_HOLDING) {
+        if (start_addr == ADDR_SET_MODE) {
+            // 40001 (운전모드)
+            uint16_t m = (d[0] << 8) | d[1];
+            const char* m_str[] = {"COOL", "DRY", "FAN", "AUTO", "HEAT"};
+            if(m <= 4) strcpy(dev_status.ac.mode, m_str[m]);
+
+            // 40002 (희망온도): getACStatus에서 2개 레지스터를 읽을 때만 유효 (ByteCount 체크)
+            if (_lastRecvBuf[2] >= 4) {
+                dev_status.ac.temp_sel = (int)(((d[2] << 8) | d[3]) / 10);
+            }
+        } else if (start_addr == ADDR_SET_WIND) {
+            dev_status.ac.fan_speed = (d[0] << 8) | d[1];
+        }
+    }
+    dev_status.ac.is_connected = true;
+    osMutexRelease(mqtt_mutex_id);
+}
+
+/* [API] 제어 및 조회 함수 */
+void setACPower(bool on) {
+    ModbusRequest(FUNC_WRITE_COIL, ADDR_AC_POWER, on ? 0xFF00 : 0x0000);
+}
+
+void setACMode(uint8_t mode) {
+    ModbusRequest(FUNC_WRITE_HOLDING, ADDR_SET_MODE, (uint16_t)mode);
+}
+
+void setACTemperature(uint16_t temp_x10) {
+    ModbusRequest(FUNC_WRITE_HOLDING, ADDR_SET_TEMP, temp_x10);
+}
+
+void setACWindSpeed(uint8_t speed) {
+    ModbusRequest(FUNC_WRITE_HOLDING, ADDR_SET_WIND, (uint16_t)speed);
+}
+
+void getACStatus(void) {
+    // 1. 전원 상태 (Coil 00001)
+    if (ModbusRequest(FUNC_READ_COIL, ADDR_AC_POWER, 1) == 0) ModbusParse(ADDR_AC_POWER, FUNC_READ_COIL);
+    // 2. 운전 모드 & 희망 온도 (Holding 40001~40002)
+    if (ModbusRequest(FUNC_READ_HOLDING, ADDR_SET_MODE, 2) == 0) ModbusParse(ADDR_SET_MODE, FUNC_READ_HOLDING);
+    // 3. 실내 온도 (Input 30003)
+    if (ModbusRequest(FUNC_READ_INPUT, ADDR_INDOOR_TEMP, 1) == 0) ModbusParse(ADDR_INDOOR_TEMP, FUNC_READ_INPUT);
+    // 4. 에러 코드 (Input 30100) - 추가됨
+    if (ModbusRequest(FUNC_READ_INPUT, ADDR_ERROR_CODE, 1) == 0) ModbusParse(ADDR_ERROR_CODE, FUNC_READ_INPUT);
+    // 5. 바람 세기 (Holding 40015)
+    if (ModbusRequest(FUNC_READ_HOLDING, ADDR_SET_WIND, 1) == 0) ModbusParse(ADDR_SET_WIND, FUNC_READ_HOLDING);
+}

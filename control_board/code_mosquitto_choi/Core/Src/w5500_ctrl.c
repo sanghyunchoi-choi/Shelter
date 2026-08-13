@@ -15,6 +15,36 @@ extern SPI_HandleTypeDef hspi1;
 
 static uint8_t s_dhcp_buf[1024];
 static bool s_dhcp_started = false;
+static bool s_prov_mode = false;
+
+void W5500_SetProvisioningMode(bool active)
+{
+	s_prov_mode = active;
+}
+
+bool W5500_IsProvisioningMode(void)
+{
+	return s_prov_mode;
+}
+
+static void W5500_ForcePhy100MFull(void)
+{
+	wiz_PhyConf phyconf;
+
+	phyconf.by = PHY_CONFBY_SW;
+	phyconf.mode = PHY_MODE_MANUAL;
+	phyconf.speed = PHY_SPEED_100;
+	phyconf.duplex = PHY_DUPLEX_FULL;
+	wizphy_setphyconf(&phyconf);
+	for (int i = 0; i < 30; i++) {
+		if ((getPHYCFGR() & 0x01) != 0) {
+			break;
+		}
+		HAL_Delay(100);
+	}
+	printf("[W5500] PHY forced 100M Full, link=%s\r\n",
+	       ((getPHYCFGR() & 0x01) != 0) ? "UP" : "DOWN");
+}
 
 /* --- 로우 레벨 SPI 버스 제어 인터페이스 --- */
 void W5500_Select(void) {
@@ -151,7 +181,10 @@ bool W5500_ApplyDhcp(void)
 /* 1초 주기 FreeRTOS OS 태스크 타이머 핸들러 */
 void W5500_DhcpTick(void)
 {
-    // [★런타임 동적 가드] 내장 플래시 로드 모드가 STATIC(0) 상태이면, DHCP 틱 연산을 즉시 패스합니다.
+	if (s_prov_mode) {
+		return;
+	}
+	// [★런타임 동적 가드] 내장 플래시 로드 모드가 STATIC(0) 상태이면, DHCP 틱 연산을 즉시 패스합니다.
     if (g_net_cfg.net_mode == 0) return;
 
     if (!s_dhcp_started) return;
@@ -183,6 +216,39 @@ bool W5500_ApplyStatic(void)
     wizchip_setnetinfo(&ni);
     W5500_PrintNetwork("STATIC OK");
     return true;
+}
+
+bool W5500_ApplyProvisioningNetwork(void)
+{
+    W5500_ForcePhy100MFull();
+
+    wiz_NetInfo ni;
+    uint8_t prov_ip[] = SHELTER_PROV_IP;
+    uint8_t prov_sn[] = SHELTER_PROV_SUBNET;
+    uint8_t prov_gw[] = SHELTER_PROV_GATEWAY;
+    uint8_t prov_dns[] = SHELTER_PROV_DNS;
+
+    memset(&ni, 0, sizeof(ni));
+    W5500_BuildMacFromUid(ni.mac);
+    memcpy(ni.ip, prov_ip, 4);
+    memcpy(ni.sn, prov_sn, 4);
+    memcpy(ni.gw, prov_gw, 4);
+    memcpy(ni.dns, prov_dns, 4);
+    ni.dhcp = NETINFO_STATIC;
+    wizchip_setnetinfo(&ni);
+    W5500_PrintNetwork("PROV SETUP");
+    return true;
+}
+
+void W5500_StopDhcp(void)
+{
+    if (!s_dhcp_started) {
+        return;
+    }
+    DHCP_stop();
+    close(SHELTER_DHCP_SOCKET_NUM);
+    s_dhcp_started = false;
+    printf("[W5500] DHCP stopped for provisioning mode\r\n");
 }
 
 /**

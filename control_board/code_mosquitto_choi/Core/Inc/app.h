@@ -28,7 +28,10 @@
 #define MAX_EXT_INPUT         4
 #define MAX_SW_INPUT          8
 
-#define PB_ID		5
+/* 제어보드 PB_ID: RS485 첫 수신 전 임시 placeholder (0~15 고정값 아님).
+ * 실제 b_id는 전원보드 4bit DIP → PB 패킷 byte[1] → PowerBoard_UpdateAllData()가
+ * dev_status.pwr_ch[].b_id 에 기록 → MQTT tele/stat 으로 서버에 전달. */
+#define PB_ID		0
 /* ======================================================================
    [2. 데이터 구조체 정의]
    ====================================================================== */
@@ -221,5 +224,6 @@ extern char             last_sent_fan_health[12];
    ====================================================================== */
 void MX_App_Init(void);
 bool Sync_RTC_With_NTP(void);
+void Sensor_RefreshEnvironmentCache(void);
 
 #endif /* INC_APP_H_ */

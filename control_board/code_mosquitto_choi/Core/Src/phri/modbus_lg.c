@@ -20,6 +20,7 @@ static volatile uint8_t _received = 0;
 static volatile uint32_t _ac_rx_isr_cnt = 0;
 #endif
 static uint8_t   _ac_rx_byte = 0;
+static uint8_t   _ac_fast_poll = 0;
 
 static void ModbusSmReset(void)
 {
@@ -232,13 +233,17 @@ int ModbusRequest(uint8_t func, uint16_t addr, uint16_t val)
 #endif
     ModbusRawSend(tx, 8);
 
-    for (i = 0; i < SHELTER_RS485_ACK_RETRIES; i++) {
+    {
+        int max_retries = _ac_fast_poll ? SHELTER_RS485_OFFLINE_RETRIES
+                                        : SHELTER_RS485_ACK_RETRIES;
+        for (i = 0; i < max_retries; i++) {
         osDelay(SHELTER_RS485_ACK_RETRY_MS);
         if (_received) {
 #if SHELTER_RS485_DEBUG_LOG
             ModbusLogHex("[AC] RX OK", _lastRecvBuf, _lastRecvLen);
 #endif
             return 0;
+        }
         }
     }
 
@@ -291,12 +296,26 @@ static void getACStatusLocked(int *ok_out, bool *discrete_ok, bool *discrete_con
     int  ok = 0;
     bool d_ok = false, d_conn = false;
 
+    _ac_fast_poll = (!dev_status.ac.is_connected) ? 1 : 0;
+
     if (ModbusRequest(FUNC_READ_DISCRETE, ADDR_AC_CONN, 1) == 0) {
         ModbusParse(ADDR_AC_CONN, FUNC_READ_DISCRETE);
         d_ok   = true;
         d_conn = dev_status.ac.is_connected;
         ok++;
     }
+
+    dev_status.ac.is_connected = (d_ok && d_conn);
+    if (!dev_status.ac.is_connected) {
+        _ac_fast_poll = 1;
+        if (ok_out)        *ok_out = ok;
+        if (discrete_ok)   *discrete_ok = d_ok;
+        if (discrete_conn) *discrete_conn = d_conn;
+        return;
+    }
+
+    _ac_fast_poll = 0;
+
     if (ModbusRequest(FUNC_READ_COIL, ADDR_AC_POWER, 1) == 0) {
         ModbusParse(ADDR_AC_POWER, FUNC_READ_COIL);
         ok++;
@@ -312,11 +331,6 @@ static void getACStatusLocked(int *ok_out, bool *discrete_ok, bool *discrete_con
     if (ModbusRequest(FUNC_READ_INPUT, ADDR_INDOOR_TEMP, 1) == 0) {
         ModbusParse(ADDR_INDOOR_TEMP, FUNC_READ_INPUT);
         ok++;
-    }
-
-    dev_status.ac.is_connected = (ok >= 2);
-    if (d_ok && !d_conn) {
-        dev_status.ac.is_connected = false;
     }
 
     if (ok_out)        *ok_out = ok;
@@ -339,6 +353,7 @@ void getACStatus(void)
 int setACPower(bool on)
 {
     if (osMutexAcquire(mqtt_mutex_id, 200) != osOK) return -1;
+    _ac_fast_poll = 0;
     int ret = ModbusRequest(FUNC_WRITE_COIL, ADDR_AC_POWER, on ? 0xFF00 : 0x0000);
     osMutexRelease(mqtt_mutex_id);
     return ret;
@@ -346,7 +361,11 @@ int setACPower(bool on)
 
 int setACMode(uint8_t mode)
 {
+    if (mode > AC_MODE_HEAT) {
+        return -1;
+    }
     if (osMutexAcquire(mqtt_mutex_id, 200) != osOK) return -1;
+    _ac_fast_poll = 0;
     int ret = ModbusRequest(FUNC_WRITE_HOLDING, ADDR_SET_MODE, (uint16_t)mode);
     osMutexRelease(mqtt_mutex_id);
     return ret;
@@ -354,7 +373,12 @@ int setACMode(uint8_t mode)
 
 int setACTemperature(uint16_t temp_x10)
 {
+    /* LG 40003: 16.0~30.0 °C ×10 */
+    if (temp_x10 < 160 || temp_x10 > 300) {
+        return -1;
+    }
     if (osMutexAcquire(mqtt_mutex_id, 200) != osOK) return -1;
+    _ac_fast_poll = 0;
     int ret = ModbusRequest(FUNC_WRITE_HOLDING, ADDR_SET_TEMP, temp_x10);
     osMutexRelease(mqtt_mutex_id);
     return ret;
@@ -362,10 +386,12 @@ int setACTemperature(uint16_t temp_x10)
 
 int setACWindSpeed(uint8_t speed)
 {
-    if (speed == AC_WIND_ULTRA) {
-        speed = 6;
+    /* LG 40002: 1~6 (현장 실내기 1대) */
+    if (speed < 1 || speed > 6) {
+        return -1;
     }
     if (osMutexAcquire(mqtt_mutex_id, 200) != osOK) return -1;
+    _ac_fast_poll = 0;
     int ret = ModbusRequest(FUNC_WRITE_HOLDING, ADDR_SET_WIND, (uint16_t)speed);
     osMutexRelease(mqtt_mutex_id);
     return ret;

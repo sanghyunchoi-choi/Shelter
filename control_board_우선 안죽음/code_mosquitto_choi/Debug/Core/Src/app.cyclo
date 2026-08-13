@@ -1,0 +1,13 @@
+../Core/Src/app.c:142:6:MQTT_Reset_Report_Flags	3
+../Core/Src/app.c:184:6:StartMQTTTask	37
+../Core/Src/app.c:459:6:StartAppTimeTask	3
+../Core/Src/app.c:491:6:StartAppSensorTask	35
+../Core/Src/app.c:725:6:PowerBoardTask	20
+../Core/Src/app.c:820:6:APTask	20
+../Core/Src/app.c:898:6:ACTask	13
+../Core/Src/app.c:972:6:HAL_TIM_IC_CaptureCallback	6
+../Core/Src/app.c:991:6:Cooler_init	4
+../Core/Src/app.c:1011:6:FANTask	19
+../Core/Src/app.c:1097:6:HAL_UART_RxCpltCallback	3
+../Core/Src/app.c:1108:6:HAL_UART_ErrorCallback	3
+../Core/Src/app.c:1127:6:MX_App_Init	9

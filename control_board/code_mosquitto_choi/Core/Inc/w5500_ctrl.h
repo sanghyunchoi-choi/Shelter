@@ -28,9 +28,17 @@ void W5500_PrintNetwork(const char *tag);
 /** STM32 96-bit UID → 24자리 HEX */
 void Board_GetDeviceUuid(char *out, size_t out_len);
 
-#if SHELTER_NET_USE_DHCP
 /** 1초 주기 태스크에서 호출 (DHCP lease 유지) */
 void W5500_DhcpTick(void);
-#endif
+
+/** PC 직결 프로비저닝 IP (192.168.0.100) 적용 */
+bool W5500_ApplyProvisioningNetwork(void);
+
+/** 직결 케이블용 PHY 100M Full + 프로비저닝 모드 플래그 */
+void W5500_SetProvisioningMode(bool active);
+bool W5500_IsProvisioningMode(void);
+
+/** DHCP 엔진 중지 (프로비저닝 전환 시) */
+void W5500_StopDhcp(void);
 
 #endif /* INC_W5500_CTRL_H_ */
