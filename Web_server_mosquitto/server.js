@@ -10,6 +10,17 @@ const PORT = process.env.PORT || 3000;
 const MQTT_BROKER = process.env.MQTT_BROKER || 'mqtt://localhost:1883'; 
 const DEVICE_TIMEOUT_MS = 5 * 60 * 1000; 
 
+// [2026-08-14 신규] 처리 안 된 예외로 서버 프로세스 전체가 죽는 것을 방지.
+// 지금까지는 이런 안전장치가 없어서, MQTT 메시지 하나라도 예상 못한 형식으로
+// 오면(JSON.parse 실패 등) 서버 전체가 조용히 죽고 스케줄/웹UI가 전부 멈출 수
+// 있었습니다. 죽이지 않고 로그만 남기도록 합니다.
+process.on('uncaughtException', (err) => {
+ console.error('[FATAL] Uncaught Exception (서버는 계속 실행됩니다):', err);
+});
+process.on('unhandledRejection', (reason) => {
+ console.error('[FATAL] Unhandled Promise Rejection (서버는 계속 실행됩니다):', reason);
+});
+
 function isVirtualInterface(name) {
  const n = (name || '').toLowerCase();
  return /docker|veth|br-|vmware|virtualbox|vboxnet|hyper-v|vethernet|wsl|loopback|npcap|tap|tun|bluetooth|wireguard|zerotier|tailscale|hamachi|singbox|clash|meta|default switch|nat|vether/i.test(n);
@@ -111,12 +122,40 @@ let lastPbTeleAt = 0;
 let lastPbDataValid = false;
 const PB_TELE_STALE_MS = 35000;
 let mqttLogSession = []; 
-let globalScheduleConfig = { 
- morningHour: 7, morningMin: 0, 
- morningFlags: { ac: true, ap: true, ad: true, pb: true }, 
- nightHour: 20, nightMin: 0, 
- nightFlags: { ac: true, ap: true, ad: true, pb: true }
-}; 
+
+// [2026-08-14 신규] 스케줄 설정을 파일로 저장 — 서버 재시작해도 설정이 유지되도록.
+// 기존에는 순수 메모리 변수라 서버가 재시작되면(PC 재부팅, 크래시, 터미널 종료 등)
+// 설정한 스케줄이 조용히 기본값으로 초기화되는 문제가 있었습니다.
+const SCHEDULE_CONFIG_PATH = path.join(__dirname, 'schedule_config.json');
+
+function loadScheduleConfig() {
+ const defaults = {
+  morningHour: 7, morningMin: 0,
+  morningFlags: { ac: true, ap: true, ad: true, pb: true },
+  nightHour: 20, nightMin: 0,
+  nightFlags: { ac: true, ap: true, ad: true, pb: true }
+ };
+ try {
+  if (fs.existsSync(SCHEDULE_CONFIG_PATH)) {
+   const saved = JSON.parse(fs.readFileSync(SCHEDULE_CONFIG_PATH, 'utf8'));
+   console.log(`[CONFIG_SYNC] 저장된 스케줄 설정 복원: 출근 ${saved.morningHour}:${saved.morningMin} / 퇴근 ${saved.nightHour}:${saved.nightMin}`);
+   return { ...defaults, ...saved };
+  }
+ } catch (e) {
+  console.error('[CONFIG_SYNC] 스케줄 설정 파일 로드 실패, 기본값 사용:', e.message);
+ }
+ return defaults;
+}
+
+function saveScheduleConfig() {
+ try {
+  fs.writeFileSync(SCHEDULE_CONFIG_PATH, JSON.stringify(globalScheduleConfig, null, 2), 'utf8');
+ } catch (e) {
+  console.error('[CONFIG_SYNC] 스케줄 설정 파일 저장 실패:', e.message);
+ }
+}
+
+let globalScheduleConfig = loadScheduleConfig();
 
 // 뼈대 마스터 상태 메모리
 const deviceState = { 
@@ -514,7 +553,8 @@ io.on('connection', (socket) => {
  globalScheduleConfig.nightFlags = verifiedFlags;
  }
  lastProcessedMinute = -1;
- console.log(`[CONFIG_SYNC] 스케줄 설정 동기화 성공`);
+ saveScheduleConfig();
+ console.log(`[CONFIG_SYNC] 스케줄 설정 동기화 성공 (파일로 저장됨)`);
  } catch (e) {
  console.error('[CONFIG_EXCEPTION]', e);
  }
