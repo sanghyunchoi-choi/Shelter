@@ -132,8 +132,12 @@ function loadScheduleConfig() {
  const defaults = {
   morningHour: 7, morningMin: 0,
   morningFlags: { ac: true, ap: true, ad: true, pb: true },
+  morningAdChannels: Array(15).fill(1),
+  morningPbChannels: Array(8).fill(1),
   nightHour: 20, nightMin: 0,
-  nightFlags: { ac: true, ap: true, ad: true, pb: true }
+  nightFlags: { ac: true, ap: true, ad: true, pb: true },
+  nightAdChannels: Array(15).fill(0),
+  nightPbChannels: Array(8).fill(0)
  };
  try {
   if (fs.existsSync(SCHEDULE_CONFIG_PATH)) {
@@ -438,6 +442,15 @@ mqttClient.on('message', (topic, message) => {
 }); 
 
 // 📅 일괄 자동 제어 스케줄러 및 개별 하위 장치 동시 연동 결속 레이어
+// [2026-08-14 신규] 채널 배열(0/1) → MQTT set_ad/set_pb 문자열 변환
+function channelArrayToStr(arr, len) {
+ const a = verifyChannelArrayGlobal(arr, len);
+ return a.join('');
+}
+function verifyChannelArrayGlobal(arr, len) {
+ if (!Array.isArray(arr) || arr.length !== len) return Array(len).fill(1);
+ return arr.map(v => (v ? 1 : 0));
+}
 let lastProcessedMinute = -1; 
 setInterval(() => {
  const now = new Date();
@@ -458,16 +471,18 @@ setInterval(() => {
  if (currentHour === globalScheduleConfig.morningHour && currentMin === globalScheduleConfig.morningMin) {
  console.log(`\r\n[🚀 SYSTEM] 전체 출근 타이머 작동 -> 하위 개별 장치 전체 동기화!!`);
  const flg = globalScheduleConfig.morningFlags || { ac: true, ap: true, ad: true, pb: true };
+ const adStr = channelArrayToStr(globalScheduleConfig.morningAdChannels, 15);
+ const pbStr = channelArrayToStr(globalScheduleConfig.morningPbChannels, 8);
  
  if (flg.ac !== false) mqttClient.publish('dev/cmnd/ac', JSON.stringify({ set_ac: { pwr: 1, mode: 'COOL', temp: 24, spd: 2 } }), { qos: 1 });
  if (flg.ap !== false) mqttClient.publish('dev/cmnd/ap', JSON.stringify({ set_ap: { pwr: 1, mode: 'AUTO', spd: 2, uv: 0, filter_reset: 0, bypass: 0, timer: 0 } }), { qos: 1 });
- if (flg.ad !== false) mqttClient.publish('dev/cmnd/ad', JSON.stringify({ set_ad: '111111111111111' }), { qos: 1 });
- if (flg.pb !== false && isPbCmdReady()) mqttClient.publish('dev/cmnd/pb', JSON.stringify({ b_id: activeBid, set_pb: '11111111' }), { qos: 1 });
+ if (flg.ad !== false) mqttClient.publish('dev/cmnd/ad', JSON.stringify({ set_ad: adStr }), { qos: 1 });
+ if (flg.pb !== false && isPbCmdReady()) mqttClient.publish('dev/cmnd/pb', JSON.stringify({ b_id: activeBid, set_pb: pbStr }), { qos: 1 });
  
  if (flg.ac !== false) { Object.assign(deviceState.ac, { pwr: 1, mode: 'COOL', temp: 24, spd: 2 }); io.emit('device_update', { topic: TOPICS.TELE_AC, data: deviceState.ac }); }
  if (flg.ap !== false) { Object.assign(deviceState.ap, { pwr: 1, mode: 'AUTO', spd: 2 }); io.emit('device_update', { topic: TOPICS.TELE_AP, data: deviceState.ap }); }
- if (flg.ad !== false) { deviceState.ad.relays = Array(15).fill(1); io.emit('device_update', { topic: TOPICS.TELE_AD, data: deviceState.ad }); }
- if (flg.pb !== false) { deviceState.pb.channels.forEach(ch => ch.sw = 1); io.emit('device_update', { topic: TOPICS.TELE_PB, data: { channels: deviceState.pb.channels, conn: deviceState.pb.conn, current_b_id: activeBid, pb_valid: lastPbDataValid } }); }
+ if (flg.ad !== false) { deviceState.ad.relays = verifyChannelArrayGlobal(globalScheduleConfig.morningAdChannels, 15); io.emit('device_update', { topic: TOPICS.TELE_AD, data: deviceState.ad }); }
+ if (flg.pb !== false) { const pbArr = verifyChannelArrayGlobal(globalScheduleConfig.morningPbChannels, 8); deviceState.pb.channels.forEach((ch, i) => ch.sw = pbArr[i]); io.emit('device_update', { topic: TOPICS.TELE_PB, data: { channels: deviceState.pb.channels, conn: deviceState.pb.conn, current_b_id: activeBid, pb_valid: lastPbDataValid } }); }
 
  io.emit('mqtt_live_log', {
  time: now.toLocaleTimeString('ko-KR', { hour12: false, timeZone: 'Asia/Seoul' }),
@@ -480,16 +495,18 @@ setInterval(() => {
  else if (currentHour === globalScheduleConfig.nightHour && currentMin === globalScheduleConfig.nightMin) {
  console.log(`\r\n[🚀 SYSTEM] 전체 퇴근 타이머 작동 -> 하위 개별 장치 전체 차단!!`);
  const flg = globalScheduleConfig.nightFlags || { ac: true, ap: true, ad: true, pb: true };
+ const adStr = channelArrayToStr(globalScheduleConfig.nightAdChannels, 15);
+ const pbStr = channelArrayToStr(globalScheduleConfig.nightPbChannels, 8);
  
  if (flg.ac !== false) mqttClient.publish('dev/cmnd/ac', JSON.stringify({ pwr: 0 }), { qos: 1 });
  if (flg.ap !== false) mqttClient.publish('dev/cmnd/ap', JSON.stringify({ pwr: 0 }), { qos: 1 });
- if (flg.ad !== false) mqttClient.publish('dev/cmnd/ad', JSON.stringify({ set_ad: '000000000000000' }), { qos: 1 });
- if (flg.pb !== false && isPbCmdReady()) mqttClient.publish('dev/cmnd/pb', JSON.stringify({ b_id: activeBid, set_pb: '00000000' }), { qos: 1 });
+ if (flg.ad !== false) mqttClient.publish('dev/cmnd/ad', JSON.stringify({ set_ad: adStr }), { qos: 1 });
+ if (flg.pb !== false && isPbCmdReady()) mqttClient.publish('dev/cmnd/pb', JSON.stringify({ b_id: activeBid, set_pb: pbStr }), { qos: 1 });
  
  if (flg.ac !== false) { deviceState.ac.pwr = 0; io.emit('device_update', { topic: TOPICS.TELE_AC, data: deviceState.ac }); }
  if (flg.ap !== false) { deviceState.ap.pwr = 0; io.emit('device_update', { topic: TOPICS.TELE_AP, data: deviceState.ap }); }
- if (flg.ad !== false) { deviceState.ad.relays = Array(15).fill(0); io.emit('device_update', { topic: TOPICS.TELE_AD, data: deviceState.ad }); }
- if (flg.pb !== false) { deviceState.pb.channels.forEach(ch => ch.sw = 0); io.emit('device_update', { topic: TOPICS.TELE_PB, data: { channels: deviceState.pb.channels, conn: deviceState.pb.conn, current_b_id: activeBid, pb_valid: lastPbDataValid } }); }
+ if (flg.ad !== false) { deviceState.ad.relays = verifyChannelArrayGlobal(globalScheduleConfig.nightAdChannels, 15); io.emit('device_update', { topic: TOPICS.TELE_AD, data: deviceState.ad }); }
+ if (flg.pb !== false) { const pbArr = verifyChannelArrayGlobal(globalScheduleConfig.nightPbChannels, 8); deviceState.pb.channels.forEach((ch, i) => ch.sw = pbArr[i]); io.emit('device_update', { topic: TOPICS.TELE_PB, data: { channels: deviceState.pb.channels, conn: deviceState.pb.conn, current_b_id: activeBid, pb_valid: lastPbDataValid } }); }
 
  io.emit('mqtt_live_log', {
  time: now.toLocaleTimeString('ko-KR', { hour12: false, timeZone: 'Asia/Seoul' }),
@@ -530,7 +547,15 @@ io.on('connection', (socket) => {
   _mqttLogSession: mqttLogSession
  });
  
- socket.on('update_schedule_config', ({ type, time, flags }) => {
+ // [2026-08-14 신규] AD 15채널 / PB 8채널 개별 선택값도 함께 검증/저장.
+ // 이전에는 클라이언트가 이 값을 서버로 보내지도 않아서, 스케줄 실행 시
+ // 항상 "전체 ON/OFF"만 나가는 버그가 있었습니다.
+ function verifyChannelArray(arr, len) {
+ if (!Array.isArray(arr) || arr.length !== len) return Array(len).fill(1);
+ return arr.map(v => (v ? 1 : 0));
+ }
+
+ socket.on('update_schedule_config', ({ type, time, flags, adChannels, pbChannels }) => {
  if (!time || !time.includes(':')) return;
  try {
  const parts = time.split(':');
@@ -543,18 +568,24 @@ io.on('connection', (socket) => {
  ad: (flags && (flags.ad === false || flags.ad === 'false')) ? false : true,
  pb: (flags && (flags.pb === false || flags.pb === 'false')) ? false : true
  };
+ const verifiedAdChannels = verifyChannelArray(adChannels, 15);
+ const verifiedPbChannels = verifyChannelArray(pbChannels, 8);
  if (type === 'morning') {
  globalScheduleConfig.morningHour = h;
  globalScheduleConfig.morningMin = m;
  globalScheduleConfig.morningFlags = verifiedFlags;
+ globalScheduleConfig.morningAdChannels = verifiedAdChannels;
+ globalScheduleConfig.morningPbChannels = verifiedPbChannels;
  } else if (type === 'night') {
  globalScheduleConfig.nightHour = h;
  globalScheduleConfig.nightMin = m;
  globalScheduleConfig.nightFlags = verifiedFlags;
+ globalScheduleConfig.nightAdChannels = verifiedAdChannels;
+ globalScheduleConfig.nightPbChannels = verifiedPbChannels;
  }
  lastProcessedMinute = -1;
  saveScheduleConfig();
- console.log(`[CONFIG_SYNC] 스케줄 설정 동기화 성공 (파일로 저장됨)`);
+ console.log(`[CONFIG_SYNC] 스케줄 설정 동기화 성공 (파일로 저장됨) — AD:[${verifiedAdChannels.join('')}] PB:[${verifiedPbChannels.join('')}]`);
  } catch (e) {
  console.error('[CONFIG_EXCEPTION]', e);
  }

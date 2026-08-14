@@ -681,20 +681,20 @@ input[type=time] { background: rgba(0,0,0,.25); color: var(--text); border: 1px 
  <span class="sched-desc">지정된 출근 시각에 맞춰 쉘터 내부 하드웨어를 안전 구동합니다.</span>
  </div>
  <div style="display: flex; align-items: center; gap: 6px;">
- <input type="time" id="sched-time-morning" value="07:00" style="padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; font-size: 16px; font-weight: 700; color: var(--primary); font-family: monospace; outline: none;">
+ <input type="time" id="sched-time-morning" value="07:00" onchange="syncSchedule('morning',{silent:true})" style="padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; font-size: 16px; font-weight: 700; color: var(--primary); font-family: monospace; outline: none;">
  <button class="ctrl-btn primary" onclick="updateScheduleTime('morning')">시간 저장</button>
  </div>
  </div>
  <!-- 장치 버튼 행 -->
  <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
- <button class="mode-btn active" id="sched-btn-ac-m" onclick="this.classList.toggle('active')">에어컨 (AC)</button>
- <button class="mode-btn active" id="sched-btn-ap-m" onclick="this.classList.toggle('active')">공기청정기 (AP)</button>
- <button class="mode-btn active" id="sched-btn-ad-m" onclick="this.classList.toggle('active')">자동문 (AD)</button>
+ <button class="mode-btn active" id="sched-btn-ac-m" onclick="toggleSchedFlag(this,'morning')">에어컨 (AC)</button>
+ <button class="mode-btn active" id="sched-btn-ap-m" onclick="toggleSchedFlag(this,'morning')">공기청정기 (AP)</button>
+ <button class="mode-btn active" id="sched-btn-ad-m" onclick="toggleSchedFlag(this,'morning')">자동문 (AD)</button>
  <!--
    [FIX 2] AD 채널 세부설정 버튼: 클릭 시 15ch 개별 ON/OFF 패널 토글
  -->
  <span class="sched-expand-toggle" onclick="toggleSchedPanel('ad-m')">채널 세부설정 ▾</span>
- <button class="mode-btn active" id="sched-btn-pb-m" onclick="this.classList.toggle('active')">전력보드 (PB)</button>
+ <button class="mode-btn active" id="sched-btn-pb-m" onclick="toggleSchedFlag(this,'morning')">전력보드 (PB)</button>
  <!--
    [FIX 2] PB 채널 세부설정 버튼: 클릭 시 8ch 개별 ON/OFF 패널 토글
  -->
@@ -730,16 +730,16 @@ input[type=time] { background: rgba(0,0,0,.25); color: var(--text); border: 1px 
  <span class="sched-desc">지정된 퇴근 시각에 맞춰 전 채널 안전 소등 및 차단을 수행합니다.</span>
  </div>
  <div style="display: flex; align-items: center; gap: 6px;">
- <input type="time" id="sched-time-night" value="20:00" style="padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; font-size: 16px; font-weight: 700; color: var(--warn); font-family: monospace; outline: none;">
+ <input type="time" id="sched-time-night" value="20:00" onchange="syncSchedule('night',{silent:true})" style="padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; font-size: 16px; font-weight: 700; color: var(--warn); font-family: monospace; outline: none;">
  <button class="ctrl-btn primary" onclick="updateScheduleTime('night')">시간 저장</button>
  </div>
  </div>
  <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
- <button class="mode-btn active" id="sched-btn-ac-n" onclick="this.classList.toggle('active')">에어컨 (OFF)</button>
- <button class="mode-btn active" id="sched-btn-ap-n" onclick="this.classList.toggle('active')">공기청정기 (OFF)</button>
- <button class="mode-btn active" id="sched-btn-ad-n" onclick="this.classList.toggle('active')">자동문 (CLOSE)</button>
+ <button class="mode-btn active" id="sched-btn-ac-n" onclick="toggleSchedFlag(this,'night')">에어컨 (OFF)</button>
+ <button class="mode-btn active" id="sched-btn-ap-n" onclick="toggleSchedFlag(this,'night')">공기청정기 (OFF)</button>
+ <button class="mode-btn active" id="sched-btn-ad-n" onclick="toggleSchedFlag(this,'night')">자동문 (CLOSE)</button>
  <span class="sched-expand-toggle" onclick="toggleSchedPanel('ad-n')">채널 세부설정 ▾</span>
- <button class="mode-btn active" id="sched-btn-pb-n" onclick="this.classList.toggle('active')">전력보드 (OFF)</button>
+ <button class="mode-btn active" id="sched-btn-pb-n" onclick="toggleSchedFlag(this,'night')">전력보드 (OFF)</button>
  <span class="sched-expand-toggle" onclick="toggleSchedPanel('pb-n')">채널 세부설정 ▾</span>
  </div>
 
@@ -1273,6 +1273,8 @@ function initSchedChannelPanels() {
      window.schedAdState[suffix][idx] ^= 1;
      this.classList.toggle('on', !!window.schedAdState[suffix][idx]);
      saveSchedChannelState();
+     // [2026-08-14 신규] 채널 클릭 즉시 서버로 자동 저장
+     syncSchedule(suffix === 'm' ? 'morning' : 'night', { silent: true });
     };
    })(i);
    row.appendChild(btn);
@@ -1297,6 +1299,8 @@ function initSchedChannelPanels() {
  this.classList.toggle('on', isOn);
  this.querySelector('.s-ch-sw').textContent = isOn ? 'ON' : 'OFF';
  saveSchedChannelState();
+ // [2026-08-14 신규] 채널 클릭 즉시 서버로 자동 저장
+ syncSchedule(suffix === 'm' ? 'morning' : 'night', { silent: true });
  };
  })(i);
  pbGrid.appendChild(div);
@@ -1316,6 +1320,7 @@ function setSchedAdAll(suffix, state) {
  const grid = document.getElementById(`sched-ad-relay-${suffix}`);
  if (grid) grid.querySelectorAll('.sched-relay-btn').forEach(btn => btn.classList.toggle('on', state === 1));
  saveSchedChannelState();
+ syncSchedule(suffix === 'm' ? 'morning' : 'night', { silent: true });
 }
 
 function setSchedPbAll(suffix, state) {
@@ -1326,6 +1331,7 @@ function setSchedPbAll(suffix, state) {
  div.querySelector('.s-ch-sw').textContent = state === 1 ? 'ON' : 'OFF';
  });
  saveSchedChannelState();
+ syncSchedule(suffix === 'm' ? 'morning' : 'night', { silent: true });
 }
 
 function saveSchedChannelState() {
@@ -1506,23 +1512,51 @@ function updateDevice(key, data) {
  }
 }
 
-function updateScheduleTime(type) {
+// [2026-08-14 신규] 버튼/채널/시간 중 하나라도 바뀌면 즉시 서버로 동기화.
+// 예전에는 "시간 저장" 버튼을 눌러야만 저장됐고, 그마저도 채널별 선택
+// (schedAdState/schedPbState)은 서버로 아예 전송되지 않아 스케줄 실행 시
+// 항상 "전체 ON/OFF"로만 나가는 버그가 있었습니다.
+function syncSchedule(type, opts) {
+ opts = opts || {};
  const inputId = type === 'morning' ? 'sched-time-morning' : 'sched-time-night';
  const targetTime = document.getElementById(inputId).value;
- if (!targetTime || !targetTime.includes(':')) { showToast('올바른 시간 포맷을 선택해 주세요.', 'error'); return; }
- const suffix = type === 'morning' ? '-m' : '-n';
+ if (!targetTime || !targetTime.includes(':')) {
+ if (!opts.silent) showToast('올바른 시간 포맷을 선택해 주세요.', 'error');
+ return;
+ }
+ const idSuffix = type === 'morning' ? '-m' : '-n';
+ const chSuffix = type === 'morning' ? 'm' : 'n';
  const deviceFlags = {
- ac: document.getElementById(`sched-btn-ac${suffix}`)?.classList.contains('active') ?? true,
- ap: document.getElementById(`sched-btn-ap${suffix}`)?.classList.contains('active') ?? true,
- ad: document.getElementById(`sched-btn-ad${suffix}`)?.classList.contains('active') ?? true,
- pb: document.getElementById(`sched-btn-pb${suffix}`)?.classList.contains('active') ?? true
+ ac: document.getElementById(`sched-btn-ac${idSuffix}`)?.classList.contains('active') ?? true,
+ ap: document.getElementById(`sched-btn-ap${idSuffix}`)?.classList.contains('active') ?? true,
+ ad: document.getElementById(`sched-btn-ad${idSuffix}`)?.classList.contains('active') ?? true,
+ pb: document.getElementById(`sched-btn-pb${idSuffix}`)?.classList.contains('active') ?? true
  };
+ const adChannels = (window.schedAdState && window.schedAdState[chSuffix]) ? window.schedAdState[chSuffix] : Array(15).fill(1);
+ const pbChannels = (window.schedPbState && window.schedPbState[chSuffix]) ? window.schedPbState[chSuffix] : Array(8).fill(1);
+
  localStorage.setItem(`shelter_sched_${type}`, targetTime);
  localStorage.setItem(`shelter_sched_flags_4ch_${type}`, JSON.stringify(deviceFlags));
+ saveSchedChannelState();
+
  if (socket && socket.connected) {
- socket.emit('update_schedule_config', { type, time: targetTime, flags: deviceFlags });
- showToast(`${type === 'morning' ? '출근' : '퇴근'} 가변 타이머 설정 동기화 완료!`, 'success');
+ socket.emit('update_schedule_config', { type, time: targetTime, flags: deviceFlags, adChannels, pbChannels });
+ if (!opts.silent) showToast(`${type === 'morning' ? '출근' : '퇴근'} 가변 타이머 설정 동기화 완료!`, 'success');
+ } else if (!opts.silent) {
+ showToast('서버와 연결되어 있지 않아 저장하지 못했습니다.', 'error');
  }
+}
+
+// "시간 저장" 버튼은 그대로 두되, 내부적으로는 동일한 syncSchedule을 호출
+// (버튼을 누르면 토스트로 명시적 확인을 보여줌)
+function updateScheduleTime(type) {
+ syncSchedule(type, { silent: false });
+}
+
+// [2026-08-14 신규] 장치(AC/AP/AD/PB) ON/OFF 버튼 — 클릭 즉시 자동 저장
+function toggleSchedFlag(btn, type) {
+ btn.classList.toggle('active');
+ syncSchedule(type, { silent: true });
 }
 
 function loadSavedSchedules() {
