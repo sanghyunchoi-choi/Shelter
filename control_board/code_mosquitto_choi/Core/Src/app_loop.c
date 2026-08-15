@@ -170,7 +170,7 @@ void RLY_All_Reset(void)
 void SCAN_External_Inputs(void)
 {
     // 실시간 핀 상태 읽기
-    bool cp4 = (HAL_GPIO_ReadPin(GPIOD, GPIO_PIN_4) == GPIO_PIN_SET);
+    bool cp4 = (HAL_GPIO_ReadPin(GPIOD, GPIO_PIN_4) == GPIO_PIN_RESET);
     bool cp5 = (HAL_GPIO_ReadPin(GPIOD, GPIO_PIN_5) == GPIO_PIN_SET);
     bool cp6 = (HAL_GPIO_ReadPin(GPIOD, GPIO_PIN_6) == GPIO_PIN_SET);
     bool cp7 = (HAL_GPIO_ReadPin(GPIOD, GPIO_PIN_7) == GPIO_PIN_SET);

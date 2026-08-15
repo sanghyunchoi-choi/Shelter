@@ -24,8 +24,7 @@ services:
       # Docker 내부 IP(172.x)가 아닌, 호스트 PC의 실제 LAN IP — install.bat 이 .env 에 자동 기록
       - SERVER_LAN_IP=${SERVER_LAN_IP}
     env_file:
-      - path: .env
-        required: false
+      - .env
     depends_on:
       - mosquitto
     restart: always

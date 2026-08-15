@@ -1,3 +1,0 @@
-../Core/Src/phri/hcsd.c:7:20:hcsd_Init	40	static
-../Core/Src/phri/hcsd.c:19:9:hcsd_UpdateValue	32	static
-../Core/Src/phri/hcsd.c:50:6:hcsd_GetTemperatureAndHumidity	32	static

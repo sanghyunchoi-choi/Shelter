@@ -16,7 +16,7 @@ D:\2026.05.08\2025_project\2)smarttech\Project\Shelter\2026.05.25_final\MOS_vers
 
 git status
 git add .
-git commit -m "[0814] 이더넷 reboot issue"
+git commit -m "[0814] 상태 저장"
 git push origin main
 
 3.  github의 파일 그냥 내려 받기 

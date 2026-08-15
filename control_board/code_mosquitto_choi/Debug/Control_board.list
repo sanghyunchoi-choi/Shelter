@@ -6092,12 +6092,12 @@ void SCAN_External_Inputs(void)
  8003666:	b089      	sub	sp, #36	@ 0x24
  8003668:	af06      	add	r7, sp, #24
     // 실시간 핀 상태 읽기
-    bool cp4 = (HAL_GPIO_ReadPin(GPIOD, GPIO_PIN_4) == GPIO_PIN_SET);
+    bool cp4 = (HAL_GPIO_ReadPin(GPIOD, GPIO_PIN_4) == GPIO_PIN_RESET);
  800366a:	2110      	movs	r1, #16
  800366c:	4870      	ldr	r0, [pc, #448]	@ (8003830 <SCAN_External_Inputs+0x1cc>)
  800366e:	f00b f8ab 	bl	800e7c8 <HAL_GPIO_ReadPin>
  8003672:	4603      	mov	r3, r0
- 8003674:	2b01      	cmp	r3, #1
+ 8003674:	2b00      	cmp	r3, #0
  8003676:	bf0c      	ite	eq
  8003678:	2301      	moveq	r3, #1
  800367a:	2300      	movne	r3, #0
